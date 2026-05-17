@@ -28,6 +28,11 @@ target_include_directories(spc_http PUBLIC
 add_library(spc_models STATIC
     models/common.cpp
     models/outlook.cpp
+    models/convective.cpp
+    models/fire_weather.cpp
+    models/watch.cpp
+    models/mesoscale.cpp
+    models/storm_report.cpp
 )
 target_link_libraries(spc_models PUBLIC spc_core)
 target_include_directories(spc_models PUBLIC
@@ -36,9 +41,7 @@ target_include_directories(spc_models PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# API client library. PR-1 ships a placeholder TU so the layered target /
-# install-export shape is locked from the start; the StaticFeed / ArcGIS /
-# Archive clients land in PR-2.
+# API client library: StaticFeed / ArcGIS (+ ArcGISPager) / Archive clients.
 add_library(spc_api STATIC
     api/client.cpp
 )
@@ -52,3 +55,14 @@ target_include_directories(spc_api PUBLIC
 # Umbrella INTERFACE library: link spc::spc to get everything.
 add_library(spc INTERFACE)
 target_link_libraries(spc INTERFACE spc_core spc_http spc_models spc_api)
+
+# Namespaced ALIAS targets so `spc::spc` (and the per-layer `spc::spc_*`)
+# resolve IDENTICALLY whether this SDK is consumed via an installed
+# `find_package(spc)` (where install(EXPORT ... NAMESPACE spc::) provides
+# them) or in-tree via FetchContent (where, without these aliases, only the
+# bare `spc` target exists). Downstream code can then always link `spc::spc`.
+add_library(spc::spc_core ALIAS spc_core)
+add_library(spc::spc_http ALIAS spc_http)
+add_library(spc::spc_models ALIAS spc_models)
+add_library(spc::spc_api ALIAS spc_api)
+add_library(spc::spc ALIAS spc)

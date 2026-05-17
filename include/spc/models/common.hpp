@@ -49,6 +49,28 @@ std::string as_spc_ts(const Json& j, const char* key);
 /// shapes collapse to `std::vector<Polygon>`. Verbatim spc-data semantics.
 std::vector<Polygon> parse_rings(const Json& geom);
 
+/// Parse an ArcGIS Esri geometry's `rings` array into our `Polygon` list.
+///
+/// SEPARATE from `parse_rings` (the verbatim GeoJSON walker) on purpose —
+/// the convective GeoJSON path must stay parity-exact, so the Esri adapter
+/// is its own function and is explicitly tuned to MATCH that path's
+/// semantics rather than the raw Esri shape.
+///
+/// Esri `{"rings":[[[x,y],...],...]}` is a FLAT list of linear rings mixing
+/// outer boundaries and interior holes, distinguished only by winding (Esri
+/// convention: clockwise = outer, counter-clockwise = hole). The verbatim
+/// GeoJSON `parse_rings` takes `coordinates[0]` / `poly[0]` — i.e. only the
+/// OUTER ring of each polygon, **discarding holes**. To stay parity-exact
+/// with that (the byte-identity gate depends on it), `parse_esri_rings`
+/// likewise keeps only outer rings: it drops counter-clockwise (positive
+/// signed-area, in lon/lat) hole rings. Verified probe-for-probe equivalent
+/// to the GeoJSON path by tests/test_arcgis.cpp.
+std::vector<Polygon> parse_esri_rings(const Json& geom);
+
+/// Shoelace signed area (Esri ring orientation helper). Positive == counter-
+/// clockwise in lon/lat space. Exposed for the parity test.
+double ring_signed_area(const Polygon& ring);
+
 /// Parse a JSON body into a `glz::generic` root. Glaze read; on malformed
 /// JSON returns the formatted error message (the public parse_* wrappers
 /// turn this into the std::runtime_error that spc-data's main.cpp catches).
