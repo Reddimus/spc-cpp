@@ -28,6 +28,11 @@ target_include_directories(spc_http PUBLIC
 add_library(spc_models STATIC
     models/common.cpp
     models/outlook.cpp
+    models/convective.cpp
+    models/fire_weather.cpp
+    models/watch.cpp
+    models/mesoscale.cpp
+    models/storm_report.cpp
 )
 target_link_libraries(spc_models PUBLIC spc_core)
 target_include_directories(spc_models PUBLIC
@@ -36,9 +41,7 @@ target_include_directories(spc_models PUBLIC
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 
-# API client library. PR-1 ships a placeholder TU so the layered target /
-# install-export shape is locked from the start; the StaticFeed / ArcGIS /
-# Archive clients land in PR-2.
+# API client library: StaticFeed / ArcGIS (+ ArcGISPager) / Archive clients.
 add_library(spc_api STATIC
     api/client.cpp
 )

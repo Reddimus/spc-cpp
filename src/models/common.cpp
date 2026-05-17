@@ -129,6 +129,66 @@ std::vector<Polygon> parse_rings(const Json& geom) {
 	return out;
 }
 
+// ===== net-new: ArcGIS Esri-rings adapter (NOT the verbatim path) =====
+
+double ring_signed_area(const Polygon& ring) {
+	// Shoelace. Sign indicates orientation; magnitude is 2*area.
+	double sum = 0.0;
+	const std::size_t n = ring.size();
+	if (n < 3) {
+		return 0.0;
+	}
+	for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
+		sum += (ring[j].lon * ring[i].lat) - (ring[i].lon * ring[j].lat);
+	}
+	return sum / 2.0;
+}
+
+std::vector<Polygon> parse_esri_rings(const Json& geom) {
+	std::vector<Polygon> out;
+	if (!geom.is_object()) {
+		return out;
+	}
+	const Json* rings_node = lookup(geom, "rings");
+	if (rings_node == nullptr || !rings_node->is_array()) {
+		return out;
+	}
+	const glz::generic::array_t& rings = rings_node->get_array();
+	out.reserve(rings.size());
+	for (const glz::generic& ring : rings) {
+		if (!ring.is_array()) {
+			continue;
+		}
+		const glz::generic::array_t& ring_arr = ring.get_array();
+		Polygon r;
+		r.reserve(ring_arr.size());
+		for (const glz::generic& pt : ring_arr) {
+			if (!pt.is_array()) {
+				continue;
+			}
+			const glz::generic::array_t& pt_arr = pt.get_array();
+			if (pt_arr.size() >= 2 && pt_arr[0].is_number() && pt_arr[1].is_number()) {
+				r.push_back({pt_arr[0].get<double>(), pt_arr[1].get<double>()});
+			}
+		}
+		if (r.empty()) {
+			continue;
+		}
+		// Parity with the verbatim GeoJSON `parse_rings`, which keeps only the
+		// OUTER ring of each polygon (coordinates[0] / poly[0]) and discards
+		// holes. Esri flattens outer + hole rings into one list distinguished
+		// by winding: clockwise == outer, counter-clockwise == hole. In
+		// lon/lat the shoelace signed area is NEGATIVE for clockwise. Keep
+		// outer rings (area <= 0); drop counter-clockwise hole rings so the
+		// Polygon set matches the GeoJSON path exactly.
+		if (ring_signed_area(r) > 0.0) {
+			continue; // counter-clockwise -> hole -> dropped (matches GeoJSON)
+		}
+		out.push_back(std::move(r));
+	}
+	return out;
+}
+
 /// Parse the top-level JSON body into a glz::generic. Returns the formatted
 /// error message on malformed JSON; the public parse_* wrappers turn that
 /// into the std::runtime_error the spc-data main.cpp catches (preserving the
