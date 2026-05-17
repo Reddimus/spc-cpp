@@ -1,0 +1,72 @@
+name: Release
+
+# Auto-publish a GitHub Release when a vX.Y.Z tag is pushed.
+# Body is the matching section of CHANGELOG.md (between the "## [X.Y.Z]"
+# heading and the next "## " heading), so tag → release stays in sync
+# without a separate manual step.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Verify tag matches CMakeLists project VERSION
+        # Pin the source-of-truth: the tag X.Y.Z must equal the
+        # `project(spc-cpp VERSION X.Y.Z ...)` field in
+        # CMakeLists.txt. Without this guard the two can drift
+        # silently and corrupt `find_package(spc-cpp VERSION X.Y.Z)`
+        # consumer queries (the generated spc-cppConfigVersion.cmake
+        # tracks PROJECT_VERSION).
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          cmake_version=$(awk -F 'VERSION |LANGUAGES' '
+            /^project\(spc-cpp / { gsub(/[ \t]/,"",$2); print $2; exit }
+          ' CMakeLists.txt)
+          if [ "$cmake_version" != "$version" ]; then
+            echo "::error::tag $tag implies version '$version' but CMakeLists.txt says '$cmake_version'" >&2
+            echo "Bump 'project(spc-cpp VERSION ...)' to match before tagging." >&2
+            exit 1
+          fi
+          echo "OK: tag $tag matches CMakeLists VERSION $cmake_version"
+
+      - name: Extract release notes from CHANGELOG.md
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          version="${tag#v}"
+          # Pipe directly to a file. DO NOT capture into a shell var
+          # and echo it back — bash treats backticks as command
+          # substitution, which silently strips every inline `code`
+          # span from the release body. Reading via `gh release create
+          # --notes-file` preserves the bytes verbatim.
+          awk -v v="$version" '
+            $0 ~ "^## \\["v"\\]" { capture=1; next }
+            capture && /^## / { exit }
+            capture { print }
+          ' CHANGELOG.md > /tmp/release_notes.md
+          if [ ! -s /tmp/release_notes.md ]; then
+            printf 'Release %s. See CHANGELOG.md for details.\n' "$tag" \
+              > /tmp/release_notes.md
+          fi
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF#refs/tags/}"
+          gh release create "$tag" \
+            --title "$tag" \
+            --notes-file /tmp/release_notes.md \
+            --verify-tag
