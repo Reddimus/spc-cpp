@@ -92,6 +92,26 @@ TEST(Parser, ProbabilisticTornado) {
 	EXPECT_DOUBLE_EQ(p.features[1].probability, 0.05);
 }
 
+// Regression: the live www.spc.noaa.gov + ArcGIS GeoJSON ship the probability
+// as an already-normalized fraction ("0.02", "0.30") — NOT an integer percent.
+// A bare `/ 100.0` turned a 2% risk into 0.0002. Both label forms must map to
+// the same [0,1] probability.
+TEST(Parser, ProbabilisticFractionalLabel) {
+	const ProbOutlookPayload p = parse_probabilistic(R"({
+		"type": "FeatureCollection",
+		"features": [
+			{"properties": {"LABEL": "0.02", "LABEL2": "2% Tornado Risk"},
+			 "geometry": {"type":"Polygon","coordinates":[[[-100,34],[-95,34],[-95,38],[-100,38],[-100,34]]]}},
+			{"properties": {"LABEL": "0.30", "LABEL2": "30% Tornado Risk"},
+			 "geometry": {"type":"Polygon","coordinates":[[[-99,35],[-96,35],[-96,37],[-99,37],[-99,35]]]}}
+		]
+	})",
+													 1, "tornado");
+	ASSERT_EQ(p.features.size(), 2u);
+	EXPECT_DOUBLE_EQ(p.features[0].probability, 0.02);
+	EXPECT_DOUBLE_EQ(p.features[1].probability, 0.30);
+}
+
 TEST(Parser, UnknownLabelSkipped) {
 	const CategoricalOutlookPayload p = parse_categorical(R"({
 		"type": "FeatureCollection",

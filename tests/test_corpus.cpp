@@ -62,16 +62,18 @@ TEST(Corpus, ArcGISGeoJsonCategoricalParses) {
 }
 
 TEST(Corpus, ProbabilisticParsesAndScales) {
-	// ArcGIS f=geojson probabilistic tornado: label is "0.02"/"0.05"/"0.10".
-	// parse_probabilistic divides by 100 (verbatim spc-data semantics), so a
-	// "0.02" label -> 0.0002 probability.
+	// ArcGIS f=geojson probabilistic tornado: label is the already-normalized
+	// fraction "0.02"/"0.05"/"0.10". parse_probabilistic passes fractions
+	// through (only integer-percent forms are /100'd), so a "0.02" label ->
+	// 0.02 probability — NOT the 0.0002 a bare /100 used to produce. The
+	// >= 0.01 floor pins that fix (every real SPC isopleth is >= 2%).
 	const ProbOutlookPayload p =
 		parse_probabilistic(slurp("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
 	ASSERT_GT(p.features.size(), 0u);
 	for (const ProbOutlookFeature& f : p.features) {
 		EXPECT_EQ(f.hazard, "tornado");
-		EXPECT_GT(f.probability, 0.0);
-		EXPECT_LT(f.probability, 1.0);
+		EXPECT_GE(f.probability, 0.01);
+		EXPECT_LE(f.probability, 1.0);
 		EXPECT_FALSE(f.rings.empty());
 	}
 }
