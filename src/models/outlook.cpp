@@ -118,8 +118,14 @@ ProbOutlookPayload parse_probabilistic(std::string_view body, std::int32_t day_o
 		}
 		ProbOutlookFeature pf;
 		pf.hazard = hazard;
-		// SPC prob isopleths store percentage as LABEL ("2", "5", "10", ...) or
-		// as DN, occasionally as a numeric.
+		// SPC prob isopleths express the risk percentage two incompatible ways
+		// depending on the source: as an integer-percent (`LABEL`/`dn` = "2",
+		// "5", "30") or as an already-normalized fraction (`LABEL` = "0.02",
+		// "0.05", "0.30" — the form the live www.spc.noaa.gov + ArcGIS GeoJSON
+		// actually ship). Normalize like the day4-8 path (convective.cpp): only
+		// values > 1 are percents to divide by 100; fractions pass through. A
+		// bare `/ 100.0` here silently produced 100x-too-small probabilities
+		// (0.02 -> 0.0002) for every real feed.
 		double pct = detail::json_number_or_numeric_string(*props, "LABEL");
 		if (pct == 0.0) {
 			pct = detail::json_number_or_numeric_string(*props, "label");
@@ -127,7 +133,7 @@ ProbOutlookPayload parse_probabilistic(std::string_view body, std::int32_t day_o
 		if (pct == 0.0) {
 			pct = detail::json_number_or_numeric_string(*props, "dn");
 		}
-		pf.probability = pct / 100.0;
+		pf.probability = pct > 1.0 ? pct / 100.0 : pct;
 		pf.issued_at = detail::as_spc_ts(*props, "ISSUE");
 		if (pf.issued_at.empty()) {
 			pf.issued_at = detail::as_spc_ts(*props, "issue");

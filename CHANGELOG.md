@@ -6,6 +6,23 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-06-06
+
+### Fixed
+
+- **`parse_probabilistic` probability scale (100x bug).** The day-1/2/3
+  probabilistic-outlook parser divided every isopleth value by 100
+  unconditionally, assuming `LABEL`/`dn` is an integer percent (`"2"`,
+  `"5"`). The live `www.spc.noaa.gov` and ArcGIS GeoJSON feeds actually
+  ship the value as an already-normalized fraction (`"0.02"`, `"0.30"`),
+  so a 2% tornado risk parsed to `0.0002` instead of `0.02`. Now
+  normalized like the day4-8 path (`pct > 1.0 ? pct / 100.0 : pct`):
+  integer percents are divided, fractions pass through. Both forms are
+  pinned by regression tests (`Parser.ProbabilisticFractionalLabel`,
+  `Corpus.ProbabilisticParsesAndScales`). Consumers that persist
+  probabilities (e.g. `spc-data`'s `spc.prob_outlooks`) get correct
+  `[0,1]` values after upgrading.
+
 ## [0.1.0] - 2026-05-17
 
 Initial public release. Open-source C++23 SDK for NOAA Storm Prediction
