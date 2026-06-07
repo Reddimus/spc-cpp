@@ -27,9 +27,14 @@ void RateLimiter::refill() noexcept {
 		std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refill_);
 
 	if (elapsed >= config_.refill_interval) {
-		std::uint16_t new_tokens =
-			static_cast<std::uint16_t>(elapsed.count() / config_.refill_interval.count());
-		tokens_ = std::min(static_cast<std::uint16_t>(tokens_ + new_tokens), config_.max_tokens);
+		// Compute the refill in a width that cannot overflow: after a long idle
+		// gap `elapsed/interval` can far exceed uint16, and narrowing it (or the
+		// `tokens_ + new_tokens` sum) to uint16 *before* the min() wraps it to a
+		// small value, defeating the cap. Widen, clamp to max_tokens, then narrow.
+		const std::int64_t new_tokens = elapsed.count() / config_.refill_interval.count();
+		const std::int64_t total = static_cast<std::int64_t>(tokens_) + new_tokens;
+		tokens_ = static_cast<std::uint16_t>(
+			std::min<std::int64_t>(total, static_cast<std::int64_t>(config_.max_tokens)));
 		last_refill_ = now;
 	}
 }
