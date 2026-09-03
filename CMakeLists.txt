@@ -68,10 +68,22 @@ endif()
 
 # Sanitizer support
 option(SPC_ENABLE_SANITIZERS "Enable AddressSanitizer and UBSanitizer" OFF)
+option(SPC_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
+if(SPC_ENABLE_SANITIZERS AND SPC_ENABLE_THREAD_SANITIZER)
+    message(FATAL_ERROR "AddressSanitizer and ThreadSanitizer require separate builds")
+endif()
 if(SPC_ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
     message(STATUS "Sanitizers enabled (ASan + UBSan)")
+endif()
+if(SPC_ENABLE_THREAD_SANITIZER)
+    if(MSVC)
+        message(FATAL_ERROR "ThreadSanitizer is not supported by this MSVC configuration")
+    endif()
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+    message(STATUS "ThreadSanitizer enabled")
 endif()
 
 # Code coverage support

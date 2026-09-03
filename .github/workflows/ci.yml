@@ -75,6 +75,25 @@ jobs:
       - run: cmake --build build-sanitized --parallel
       - run: ctest --test-dir build-sanitized --output-on-failure
 
+  thread-sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev
+      - name: Build with ThreadSanitizer
+        run: >-
+          cmake -S . -B build-thread-sanitized
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_LTO=OFF
+          -DSPC_ENABLE_THREAD_SANITIZER=ON
+          -DSPC_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-thread-sanitized --parallel
+      - run: ctest --test-dir build-thread-sanitized --output-on-failure
+
   clang-tidy:
     runs-on: ubuntu-24.04
     steps:

@@ -11,6 +11,7 @@ python3 tools/verify_arcgis_metadata.py  # live, opt-in
 ```
 
 Use `-DSPC_ENABLE_SANITIZERS=ON` for ASan and UBSan. Use
+`-DSPC_ENABLE_THREAD_SANITIZER=ON` in a separate build for TSan. Use
 `-DSPC_ENABLE_CLANG_TIDY=ON` for the configured clang-tidy gate.
 
 ## Architecture

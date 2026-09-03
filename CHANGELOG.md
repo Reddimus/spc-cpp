@@ -13,7 +13,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - ArcGIS access for conditional intensity and day 4 through 8 probability.
 - An injectable `HttpTransport` for deterministic client tests and custom
   networking.
-- Installed-package and FetchContent consumer checks, sanitizer CI, and
+- Installed-package and FetchContent consumer checks, ASan, UBSan, TSan, and
   clang-tidy CI.
 - A checked NOAA ArcGIS 11.3 layer contract and opt-in live metadata check.
 
