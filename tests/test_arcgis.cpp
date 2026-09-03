@@ -271,7 +271,27 @@ TEST(NetNewModels, FireWeatherOmitsNoRiskSentinelPolygons) {
 		parse_fire_weather(body, 4, FireWeatherLayer::DryThunderstorm);
 
 	ASSERT_EQ(payload.features.size(), 1u);
-	EXPECT_EQ(payload.features[0].label, "IDRT");
+	EXPECT_TRUE(payload.features[0].label.empty());
+	EXPECT_DOUBLE_EQ(payload.features[0].probability, 0.05);
+	EXPECT_EQ(payload.features[0].severity, 0);
+}
+
+TEST(NetNewModels, ExtendedFireWeatherNormalizesPublishedProbabilities) {
+	const std::string body = R"({"features":[
+		{"attributes":{"label":"0.40","dn":40},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
+		{"attributes":{"dn":"15"},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}}
+	]})";
+
+	const FireWeatherPayload payload =
+		parse_fire_weather(body, 5, FireWeatherLayer::WindLowHumidity);
+
+	ASSERT_EQ(payload.features.size(), 2u);
+	EXPECT_EQ(payload.features[0].label, "0.40");
+	EXPECT_DOUBLE_EQ(payload.features[0].probability, 0.40);
+	EXPECT_EQ(payload.features[0].severity, 0);
+	EXPECT_TRUE(payload.features[1].label.empty());
+	EXPECT_DOUBLE_EQ(payload.features[1].probability, 0.15);
+	EXPECT_EQ(payload.features[1].severity, 0);
 }
 
 TEST(NetNewModels, MesoscaleRawTextOnly) {

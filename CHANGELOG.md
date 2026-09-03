@@ -20,8 +20,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - Fire-weather queries now merge both feature layers for every day from 1
-  through 8. Each feature records its source layer. Group layers are never
-  used as feature endpoints.
+  through 8. Each feature records its source layer. Days 1 and 2 expose the
+  categorical severity; days 3 through 8 expose a normalized probability.
+  Group layers are never used as feature endpoints.
 - Static probabilistic feeds now use NOAA's published `day{N}otlk_*` filenames.
 - Glaze is now 8.3.0 and GoogleTest is now 1.18.0.
 - libcurl global state now initializes once per process instead of once per

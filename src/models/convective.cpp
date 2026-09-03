@@ -91,16 +91,7 @@ Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
 		if (f.label.empty()) {
 			f.label = detail::json_string(*props, "label");
 		}
-		double pct = detail::json_number_or_numeric_string(*props, "LABEL");
-		if (pct == 0.0) {
-			pct = detail::json_number_or_numeric_string(*props, "label");
-		}
-		if (pct == 0.0) {
-			pct = detail::json_number_or_numeric_string(*props, "dn");
-		}
-		// LABEL "0.15" is already a fraction; dn "15" is a percent. Normalize
-		// to [0,1]: values > 1 are treated as percent.
-		f.probability = pct > 1.0 ? pct / 100.0 : pct;
+		f.probability = detail::normalized_probability(*props);
 		f.issued_at = ts_any(*props, "ISSUE", "issue");
 		f.valid_from = ts_any(*props, "VALID", "valid");
 		f.valid_until = ts_any(*props, "EXPIRE", "expire");

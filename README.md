@@ -42,6 +42,8 @@ Supported ArcGIS products include:
 - Day 1 through 3 conditional intensity.
 - Day 4 through 8 severe probability.
 - Day 1 through 8 fire weather, merging both published layers for each day.
+  Days 1 and 2 report categorical severity; days 3 through 8 report normalized
+  probability.
 - Active mesoscale discussions.
 
 `StaticFeedClient` provides categorical, probabilistic, and day 4 through 8

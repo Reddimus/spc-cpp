@@ -139,7 +139,9 @@ FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
 		f.day = day;
 		f.layer = layer;
 		f.label = published_label;
-		if (f.label.empty()) {
+		if (day >= 3) {
+			f.probability = detail::normalized_probability(*props);
+		} else if (f.label.empty()) {
 			f.label = label_from_dn(*props, layer);
 		}
 		f.severity = fire_severity_from_label(f.label);
@@ -147,7 +149,7 @@ FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
 		f.valid_from = ts_any(*props, "VALID", "valid");
 		f.valid_until = ts_any(*props, "EXPIRE", "expire");
 		f.rings = rings_any(*geometry);
-		if (!f.rings.empty()) {
+		if (!f.rings.empty() && (day <= 2 || f.probability > 0.0)) {
 			payload.features.push_back(std::move(f));
 		}
 	}

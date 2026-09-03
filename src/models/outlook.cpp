@@ -127,14 +127,7 @@ ProbOutlookPayload parse_probabilistic(
 		// values > 1 are percents to divide by 100; fractions pass through. A
 		// bare `/ 100.0` here silently produced 100x-too-small probabilities
 		// (0.02 -> 0.0002) for every real feed.
-		double pct = detail::json_number_or_numeric_string(*props, "LABEL");
-		if (pct == 0.0) {
-			pct = detail::json_number_or_numeric_string(*props, "label");
-		}
-		if (pct == 0.0) {
-			pct = detail::json_number_or_numeric_string(*props, "dn");
-		}
-		pf.probability = pct > 1.0 ? pct / 100.0 : pct;
+		pf.probability = detail::normalized_probability(*props);
 		pf.issued_at = detail::as_spc_ts(*props, "ISSUE");
 		if (pf.issued_at.empty()) {
 			pf.issued_at = detail::as_spc_ts(*props, "issue");
