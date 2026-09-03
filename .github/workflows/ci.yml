@@ -25,6 +25,9 @@ jobs:
       - name: Test
         run: make test
 
+      - name: Verify fixture provenance
+        run: make fixtures-check
+
       - name: Lint
         run: make lint
 

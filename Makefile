@@ -8,7 +8,7 @@ NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.performancecores 2>/dev/null 
 
 .PHONY: all build debug test lint clean configure configure-debug help format pre-commit \
 	install-hooks coverage lint-md format-md \
-	test-consumers \
+	test-consumers fixtures-check \
 	run-static_feed run-arcgis run-archive
 
 all: build
@@ -32,6 +32,9 @@ test: build
 
 test-consumers:
 	@./tools/test_consumers.sh
+
+fixtures-check:
+	@python3 tools/verify_fixture_checksums.py
 
 lint:
 	@if command -v clang-format >/dev/null 2>&1; then \

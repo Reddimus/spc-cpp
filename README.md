@@ -107,6 +107,7 @@ need one layer directly.
 make test
 make lint
 make test-consumers
+make fixtures-check
 python3 tools/verify_arcgis_metadata.py  # requires network access
 ```
 

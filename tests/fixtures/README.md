@@ -40,6 +40,9 @@ test (`*.esri.json` = `f=json` Esri rings; `*.geojson` = `f=geojson`):
 parents from the three service metadata URLs stored in the file. Run
 `python3 tools/verify_arcgis_metadata.py` to compare it with the live services.
 
+`SHA256SUMS` covers every payload and metadata fixture. Run `make
+fixtures-check` after checkout and whenever a fixture changes.
+
 ## IEM archive (`mesonet.agron.iastate.edu`, best-effort backfill)
 
 - `iem_storm_reports.json` — LSR GeoJSON FeatureCollection (Point geometry).
