@@ -44,6 +44,58 @@ std::string ts_any(const Json& props, const char* upper, const char* lower) {
 	return v;
 }
 
+std::string label_any(const Json& props) {
+	std::string label = detail::json_string(props, "LABEL");
+	if (label.empty()) {
+		label = detail::json_string(props, "label");
+	}
+	return label;
+}
+
+bool has_zero_dn(const Json& props) {
+	const Json* dn = detail::lookup(props, "dn");
+	if (dn == nullptr) {
+		return false;
+	}
+	if (dn->is_number()) {
+		return dn->get<double>() == 0.0;
+	}
+	if (!dn->is_string()) {
+		return false;
+	}
+	const std::string text = dn->get<std::string>();
+	std::size_t consumed = 0;
+	try {
+		return std::stod(text, &consumed) == 0.0 && consumed == text.size();
+	} catch (...) {
+		return false;
+	}
+}
+
+std::string label_from_dn(const Json& props, FireWeatherLayer layer) {
+	const double dn = detail::json_number_or_numeric_string(props, "dn");
+	if (layer == FireWeatherLayer::Outlook) {
+		if (dn == 5.0) {
+			return "ELEV";
+		}
+		if (dn == 8.0) {
+			return "CRIT";
+		}
+		if (dn == 10.0) {
+			return "EXTM";
+		}
+	}
+	if (layer == FireWeatherLayer::DryThunderstorm) {
+		if (dn == 5.0) {
+			return "IDRT";
+		}
+		if (dn == 8.0) {
+			return "SDRT";
+		}
+	}
+	return {};
+}
+
 } // namespace
 
 std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
@@ -61,6 +113,11 @@ std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
 }
 
 FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day) {
+	return parse_fire_weather(body, day, FireWeatherLayer::Outlook);
+}
+
+FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
+									  FireWeatherLayer layer) {
 	const Json root = parse_root_or_throw(body);
 	FireWeatherPayload payload;
 	payload.day = day;
@@ -74,18 +131,25 @@ FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day) {
 		if (props == nullptr || geometry == nullptr) {
 			continue;
 		}
+		const std::string published_label = label_any(*props);
+		if (has_zero_dn(*props) || published_label == "Probability Too Low") {
+			continue;
+		}
 		FireWeatherFeature f;
 		f.day = day;
-		f.label = detail::json_string(*props, "LABEL");
-		if (f.label.empty()) {
-			f.label = detail::json_string(*props, "label");
+		f.layer = layer;
+		f.label = published_label;
+		if (day >= 3) {
+			f.probability = detail::normalized_probability(*props);
+		} else if (f.label.empty()) {
+			f.label = label_from_dn(*props, layer);
 		}
 		f.severity = fire_severity_from_label(f.label);
 		f.issued_at = ts_any(*props, "ISSUE", "issue");
 		f.valid_from = ts_any(*props, "VALID", "valid");
 		f.valid_until = ts_any(*props, "EXPIRE", "expire");
 		f.rings = rings_any(*geometry);
-		if (!f.rings.empty()) {
+		if (!f.rings.empty() && (day <= 2 || f.probability > 0.0)) {
 			payload.features.push_back(std::move(f));
 		}
 	}

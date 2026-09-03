@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.20)
-project(spc-cpp VERSION 0.1.1 LANGUAGES CXX)
+project(spc-cpp VERSION 0.2.0 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,6 +14,30 @@ option(SPC_BUILD_TESTS "Build tests" ON)
 option(SPC_BUILD_EXAMPLES "Build examples" ON)
 option(SPC_ENABLE_LTO "Enable Link Time Optimization" ON)
 option(SPC_NATIVE_ARCH "Use -march=native for CPU-specific tuning" OFF)
+option(SPC_ENABLE_CLANG_TIDY "Run clang-tidy while compiling project targets" OFF)
+option(SPC_WARNINGS_AS_ERRORS "Treat project warnings as errors" OFF)
+
+if(SPC_ENABLE_CLANG_TIDY)
+    find_program(SPC_CLANG_TIDY_EXECUTABLE NAMES clang-tidy REQUIRED)
+endif()
+
+function(spc_configure_target target)
+    if(MSVC)
+        target_compile_options(${target} PRIVATE /W4)
+        if(SPC_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE /WX)
+        endif()
+    else()
+        target_compile_options(${target} PRIVATE -Wall -Wextra -Wpedantic)
+        if(SPC_WARNINGS_AS_ERRORS)
+            target_compile_options(${target} PRIVATE -Werror)
+        endif()
+    endif()
+    if(SPC_ENABLE_CLANG_TIDY)
+        set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
+            "${SPC_CLANG_TIDY_EXECUTABLE};--warnings-as-errors=*")
+    endif()
+endfunction()
 
 # Aggressive optimization flags for Release builds. MSVC has its own
 # Release defaults; only override for GCC/Clang.
@@ -51,10 +75,22 @@ endif()
 
 # Sanitizer support
 option(SPC_ENABLE_SANITIZERS "Enable AddressSanitizer and UBSanitizer" OFF)
+option(SPC_ENABLE_THREAD_SANITIZER "Enable ThreadSanitizer" OFF)
+if(SPC_ENABLE_SANITIZERS AND SPC_ENABLE_THREAD_SANITIZER)
+    message(FATAL_ERROR "AddressSanitizer and ThreadSanitizer require separate builds")
+endif()
 if(SPC_ENABLE_SANITIZERS)
     add_compile_options(-fsanitize=address,undefined -fno-omit-frame-pointer)
     add_link_options(-fsanitize=address,undefined)
     message(STATUS "Sanitizers enabled (ASan + UBSan)")
+endif()
+if(SPC_ENABLE_THREAD_SANITIZER)
+    if(MSVC)
+        message(FATAL_ERROR "ThreadSanitizer is not supported by this MSVC configuration")
+    endif()
+    add_compile_options(-fsanitize=thread -fno-omit-frame-pointer)
+    add_link_options(-fsanitize=thread)
+    message(STATUS "ThreadSanitizer enabled")
 endif()
 
 # Code coverage support
@@ -76,12 +112,12 @@ include(FetchContent)
 # polymorphic (Polygon/MultiPolygon). This DIVERGES from the nlohmann-based
 # nws-cpp / ncei-cpp SDKs on purpose (see README + CHANGELOG). The convective
 # parse path is lifted verbatim from the internal spc-data service.
-# License: MIT. Pinned to the same v7.6.0 the rest of the estate uses so a
+# License: MIT. Pinned to the same v8.3.0 the rest of the estate uses so a
 # combined FetchContent build dedupes to a single glaze::glaze target.
 FetchContent_Declare(
     glaze
     GIT_REPOSITORY https://github.com/stephenberry/glaze.git
-    GIT_TAG v7.6.0
+    GIT_TAG v8.3.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(glaze)
@@ -96,10 +132,11 @@ if(SPC_BUILD_TESTS)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.15.2
+        GIT_TAG v1.18.0
         GIT_SHALLOW TRUE
     )
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
+    set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
     add_subdirectory(tests)
@@ -120,6 +157,13 @@ install(TARGETS spc_core spc_http spc_models spc_api spc
     INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
 )
 install(DIRECTORY include/spc DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+# Public model headers use Glaze's generic JSON types. Install the pinned
+# headers so find_package consumers do not need a second package manager.
+install(DIRECTORY ${glaze_SOURCE_DIR}/include/glaze DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+install(FILES ${glaze_SOURCE_DIR}/LICENSE
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp
+    RENAME glaze-LICENSE
+)
 
 configure_package_config_file(
     ${CMAKE_CURRENT_SOURCE_DIR}/cmake/spcConfig.cmake.in

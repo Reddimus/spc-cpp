@@ -24,7 +24,8 @@ namespace spc {
 														  std::int32_t day_offset);
 
 /// Parse SPC's day-N probabilistic outlook GeoJSON
-/// (day{1,2}probotlk_{torn,hail,wind}.geojson) from a raw JSON body. Throws
+/// (day{1,2}otlk_{torn,hail,wind}.geojson or day3otlk_prob.geojson) from a
+/// raw JSON body. Throws
 /// std::runtime_error on malformed JSON.
 [[nodiscard]] ProbOutlookPayload parse_probabilistic(std::string_view body, std::int32_t day_offset,
 													 std::string hazard);

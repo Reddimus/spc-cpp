@@ -59,6 +59,18 @@ double json_number_or_numeric_string(const Json& obj, const char* key) {
 	return 0.0;
 }
 
+double normalized_probability(const Json& obj) {
+	double value = json_number_or_numeric_string(obj, "LABEL");
+	if (value == 0.0) {
+		value = json_number_or_numeric_string(obj, "label");
+	}
+	if (value == 0.0) {
+		value = json_number_or_numeric_string(obj, "dn");
+	}
+	const double normalized = value > 1.0 ? value / 100.0 : value;
+	return normalized >= 0.0 && normalized <= 1.0 ? normalized : 0.0;
+}
+
 /// Convert SPC's compact "YYYYMMDDHHMM" timestamp to ISO 8601
 /// "YYYY-MM-DDTHH:MM:00Z". Returns the input unchanged if the format doesn't
 /// match.

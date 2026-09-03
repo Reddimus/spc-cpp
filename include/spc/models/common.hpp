@@ -38,6 +38,10 @@ std::string json_string(const Json& obj, const char* key);
 /// Always returns a numeric view; non-numeric / missing yields 0.
 double json_number_or_numeric_string(const Json& obj, const char* key);
 
+/// Read an SPC probability from LABEL/label/dn and normalize it to [0, 1].
+/// Fractional labels pass through; integer-percent values are divided by 100.
+double normalized_probability(const Json& obj);
+
 /// Convert SPC's compact "YYYYMMDDHHMM" timestamp to ISO 8601
 /// "YYYY-MM-DDTHH:MM:00Z"; returns the input unchanged on format mismatch.
 std::string spc_ts_to_iso8601(std::string_view spc_ts);

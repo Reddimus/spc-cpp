@@ -1,0 +1,80 @@
+{
+  "captured_at": "2026-09-03",
+  "services": [
+    {
+      "name": "outlooks",
+      "url": "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer?f=pjson",
+      "currentVersion": 11.3,
+      "queryable": [1, 2, 3, 4, 5, 6, 7, 9, 10, 11, 12, 13, 14, 15, 17, 18, 19, 21, 22, 23, 24, 25],
+      "layers": [
+        [0, "Day 1 Convective Outlook", -1],
+        [1, "Day 1 Categorical Outlook", 0],
+        [2, "Day 1 Tornado Conditional Intensity", 0],
+        [3, "Day 1 Probabilistic Tornado Outlook", 0],
+        [4, "Day 1 Hail Conditional Intensity", 0],
+        [5, "Day 1 Probabilistic Hail Outlook", 0],
+        [6, "Day 1 Wind Conditional Intensity", 0],
+        [7, "Day 1 Probabilistic Wind Outlook", 0],
+        [8, "Day 2 Convective Outlook", -1],
+        [9, "Day 2 Categorical Outlook", 8],
+        [10, "Day 2 Tornado Conditional Intensity", 8],
+        [11, "Day 2 Probabilistic Tornado Outlook", 8],
+        [12, "Day 2 Hail Conditional Intensity", 8],
+        [13, "Day 2 Probabilistic Hail Outlook", 8],
+        [14, "Day 2 Wind Conditional Intensity", 8],
+        [15, "Day 2 Probabilistic Wind Outlook", 8],
+        [16, "Day 3 Convective Outlook", -1],
+        [17, "Day 3 Categorical Outlook", 16],
+        [18, "Day 3 Severe Conditional Intensity", 16],
+        [19, "Day 3 Probabilistic Outlook", 16],
+        [20, "Day 4 - 8 Convective Outlook", -1],
+        [21, "Day 4 Probabilistic Outlook", 20],
+        [22, "Day 5 Probabilistic Outlook", 20],
+        [23, "Day 6 Probabilistic Outlook", 20],
+        [24, "Day 7 Probabilistic Outlook", 20],
+        [25, "Day 8 Probabilistic Outlook", 20]
+      ]
+    },
+    {
+      "name": "fire-weather",
+      "url": "https://mapservices.weather.noaa.gov/vector/rest/services/fire_weather/SPC_firewx/MapServer?f=pjson",
+      "currentVersion": 11.3,
+      "queryable": [1, 2, 4, 5, 7, 8, 10, 11, 13, 14, 16, 17, 19, 20, 22, 23],
+      "layers": [
+        [0, "Day 1 Fire Weather Outlook", -1],
+        [1, "Day 1 Outlook", 0],
+        [2, "Day 1 Outlook Dry Thunderstorm", 0],
+        [3, "Day 2 Fire Weather Outlook", -1],
+        [4, "Day 2 Outlook", 3],
+        [5, "Day 2 Outlook Dry Thunderstorm", 3],
+        [6, "Day 3 Fire Weather Outlook", -1],
+        [7, "Day 3 Dry Thunderstorm", 6],
+        [8, "Day 3 Winds and Low Humidity", 6],
+        [9, "Day 4 Fire Weather Outlook", -1],
+        [10, "Day 4 Dry Thunderstorm", 9],
+        [11, "Day 4 Winds and Low Humidity", 9],
+        [12, "Day 5 Fire Weather Outlook", -1],
+        [13, "Day 5 Dry Thunderstorm", 12],
+        [14, "Day 5 Winds and Low Humidity", 12],
+        [15, "Day 6 Fire Weather Outlook", -1],
+        [16, "Day 6 Dry Thunderstorm", 15],
+        [17, "Day 6 Winds and Low Humidity", 15],
+        [18, "Day 7 Fire Weather Outlook", -1],
+        [19, "Day 7 Dry Thunderstorm", 18],
+        [20, "Day 7 Winds and Low Humidity", 18],
+        [21, "Day 8 Fire Weather Outlook", -1],
+        [22, "Day 8 Dry Thunderstorm", 21],
+        [23, "Day 8 Winds and Low Humidity", 21]
+      ]
+    },
+    {
+      "name": "mesoscale-discussions",
+      "url": "https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer?f=pjson",
+      "currentVersion": 11.3,
+      "queryable": [0],
+      "layers": [
+        [0, "SPC Mesoscale Discussion", -1]
+      ]
+    }
+  ]
+}

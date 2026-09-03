@@ -35,22 +35,49 @@ bool is_absolute_url(std::string_view path) {
 	return path.starts_with("http://") || path.starts_with("https://");
 }
 
+class CurlRuntime {
+public:
+	CurlRuntime() : status_(curl_global_init(CURL_GLOBAL_DEFAULT)) {}
+	~CurlRuntime() {
+		if (status_ == CURLE_OK) {
+			curl_global_cleanup();
+		}
+	}
+
+	CurlRuntime(const CurlRuntime&) = delete;
+	CurlRuntime& operator=(const CurlRuntime&) = delete;
+
+	[[nodiscard]] CURLcode status() const noexcept { return status_; }
+
+private:
+	CURLcode status_;
+};
+
+CurlRuntime& curl_runtime() {
+	// Function-local static initialization is thread-safe. Keep libcurl's
+	// process-wide state alive until normal process shutdown.
+	static CurlRuntime runtime;
+	return runtime;
+}
+
 } // namespace
 
 struct HttpClient::Impl {
 	ClientConfig config;
 	CURL* curl{nullptr};
+	CURLcode global_status{CURLE_OK};
 
 	explicit Impl(ClientConfig cfg) : config(std::move(cfg)) {
-		curl_global_init(CURL_GLOBAL_DEFAULT);
-		curl = curl_easy_init();
+		global_status = curl_runtime().status();
+		if (global_status == CURLE_OK) {
+			curl = curl_easy_init();
+		}
 	}
 
 	~Impl() {
 		if (curl != nullptr) {
 			curl_easy_cleanup(curl);
 		}
-		curl_global_cleanup();
 	}
 
 	Impl(const Impl&) = delete;
@@ -65,7 +92,10 @@ HttpClient& HttpClient::operator=(HttpClient&&) noexcept = default;
 
 Result<HttpResponse> HttpClient::get(std::string_view path) const {
 	if (impl_->curl == nullptr) {
-		return std::unexpected(Error::network("curl_easy_init failed"));
+		const char* message = impl_->global_status == CURLE_OK
+								  ? "curl_easy_init failed"
+								  : curl_easy_strerror(impl_->global_status);
+		return std::unexpected(Error::network(message));
 	}
 
 	CURL* curl = impl_->curl;

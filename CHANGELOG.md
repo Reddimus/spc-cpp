@@ -6,6 +6,43 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-03
+
+### Added
+
+- ArcGIS access for conditional intensity and day 4 through 8 probability.
+- An injectable `HttpTransport` for deterministic client tests and custom
+  networking.
+- Installed-package and FetchContent consumer checks, ASan, UBSan, TSan, and
+  clang-tidy CI.
+- A checked NOAA ArcGIS 11.3 layer contract and opt-in live metadata check.
+
+### Changed
+
+- Fire-weather queries now merge both feature layers for every day from 1
+  through 8. Each feature records its source layer. Days 1 and 2 expose the
+  categorical severity; days 3 through 8 expose a normalized probability.
+  Group layers are never used as feature endpoints.
+- Static probabilistic feeds now use NOAA's published `day{N}otlk_*` filenames.
+- Glaze is now 8.3.0 and GoogleTest is now 1.18.0.
+- libcurl global state now initializes once per process instead of once per
+  client.
+
+### Fixed
+
+- Corrected the Day 2 tornado and hail probability layers, Day 3 probability,
+  and every Day 3 through 8 fire-weather layer.
+- Decode NOAA's numeric Day 1 and 2 fire-weather `dn` categories without
+  confusing outlook and dry-thunderstorm labels.
+- Percent-encoded ArcGIS query values and parse ArcGIS error and paging fields
+  as JSON.
+- Invalid product combinations now fail before network access.
+
+### Deprecated
+
+- `ArcGISClient::query_active_watches()`. NOAA's WWA polygons do not contain
+  the SPC fields in `WatchPayload`; use `ArchiveClient::watches()`.
+
 ## [0.1.1] - 2026-06-06
 
 ### Fixed

@@ -30,6 +30,7 @@ namespace spc {
 class StaticFeedClient {
 public:
 	explicit StaticFeedClient(ClientConfig config = {});
+	explicit StaticFeedClient(std::shared_ptr<HttpTransport> transport);
 	~StaticFeedClient();
 	StaticFeedClient(StaticFeedClient&&) noexcept;
 	StaticFeedClient& operator=(StaticFeedClient&&) noexcept;
@@ -40,7 +41,8 @@ public:
 	/// normal "no active outlook"; callers clear rows, not error out.
 	[[nodiscard]] Result<CategoricalOutlookPayload> day_categorical(std::int32_t day);
 
-	/// Day-N probabilistic (day 1: hazard tornado|hail|wind; day 2: "any").
+	/// Day-N probabilistic. Days 1 and 2 accept tornado, hail, or wind.
+	/// Day 3 accepts severe. "any" remains an alias for day-3 severe.
 	[[nodiscard]] Result<ProbOutlookPayload> day_probabilistic(std::int32_t day,
 															   const std::string& hazard);
 
@@ -65,12 +67,20 @@ struct QueryParams {
 	std::string f{"json"}; ///< "json" (Esri) or "geojson"
 };
 
+/// NOAA MapServer used by a raw ArcGIS query.
+enum class ArcGISService : std::uint8_t {
+	Outlooks,
+	FireWeather,
+	MesoscaleDiscussions,
+};
+
 /// SPC ArcGIS MapServer client. Layer ids are the documented
 /// `SPC_wx_outlks` / `SPC_firewx` / `spc_mesoscale_discussion` layout.
 /// Paginates via `ArcGISPager` (2000-record transfer limit).
 class ArcGISClient {
 public:
 	explicit ArcGISClient(ClientConfig config = {});
+	explicit ArcGISClient(std::shared_ptr<HttpTransport> transport);
 	~ArcGISClient();
 	ArcGISClient(ArcGISClient&&) noexcept;
 	ArcGISClient& operator=(ArcGISClient&&) noexcept;
@@ -80,15 +90,25 @@ public:
 	[[nodiscard]] Result<CategoricalOutlookPayload> query_categorical(std::int32_t day);
 	[[nodiscard]] Result<ProbOutlookPayload> query_probabilistic(std::int32_t day,
 																 const std::string& hazard);
+	[[nodiscard]] Result<ConditionalIntensityPayload>
+	query_conditional_intensity(std::int32_t day, const std::string& hazard);
+	[[nodiscard]] Result<Day48OutlookPayload> query_day4_8(std::int32_t day);
 	[[nodiscard]] Result<FireWeatherPayload> query_fire_weather(std::int32_t day);
-	[[nodiscard]] Result<WatchPayload> query_active_watches();
+	/// NOAA's WWA polygons do not contain the SPC watch parameters represented
+	/// by WatchPayload. Use ArchiveClient::watches() for active SPC watches.
+	[[deprecated(
+		"use ArchiveClient::watches() for SPC watch data")]] [[nodiscard]] Result<WatchPayload>
+	query_active_watches();
 	[[nodiscard]] Result<MesoscalePayload> query_active_md();
 	[[nodiscard]] Result<StormReportPayload> query_storm_reports();
 
-	/// Escape hatch: raw paged query against an arbitrary layer id; returns
-	/// the concatenated raw response bodies (one per page).
-	[[nodiscard]] Result<std::vector<std::string>> query_layer(std::int32_t layer_id,
-															   const QueryParams& params);
+	/// Raw paged query against one of the documented NOAA MapServers.
+	[[nodiscard]] Result<std::vector<std::string>>
+	query_layer(ArcGISService service, std::int32_t layer_id, const QueryParams& params);
+
+	/// Compatibility overload. Queries the SPC outlook MapServer.
+	[[deprecated("pass ArcGISService explicitly")]] [[nodiscard]] Result<std::vector<std::string>>
+	query_layer(std::int32_t layer_id, const QueryParams& params);
 
 private:
 	struct Impl;
@@ -103,6 +123,7 @@ private:
 class ArchiveClient {
 public:
 	explicit ArchiveClient(ClientConfig config = {});
+	explicit ArchiveClient(std::shared_ptr<HttpTransport> transport);
 	~ArchiveClient();
 	ArchiveClient(ArchiveClient&&) noexcept;
 	ArchiveClient& operator=(ArchiveClient&&) noexcept;

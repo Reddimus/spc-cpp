@@ -26,9 +26,20 @@ struct ClientConfig {
 	/// URLs — one client then serves spc.noaa.gov, the ArcGIS MapServer,
 	/// and the IEM archive interchangeably (spc-data's fetcher behavior).
 	std::string base_url;
-	std::string user_agent{"PredictionCastAI spc-cpp/0.1.0 (contact@predictioncast.ai)"};
+	std::string user_agent{"spc-cpp/0.2.0 (contact@predictioncast.ai)"};
 	std::chrono::seconds timeout{15};
 	bool verify_ssl{true};
+};
+
+/// GET transport boundary used by the high-level clients.
+///
+/// Applications normally use HttpClient. The interface also lets callers
+/// supply their own networking stack and lets tests run without NOAA access.
+class HttpTransport {
+public:
+	virtual ~HttpTransport() = default;
+
+	[[nodiscard]] virtual Result<HttpResponse> get(std::string_view path) const = 0;
 };
 
 /// GET-only HTTP client. Behavior parity with spc-data/src/fetcher.cpp:
@@ -37,10 +48,10 @@ struct ClientConfig {
 ///
 /// @note NOT thread-safe — the CURL handle is shared per instance. Use one
 /// client per thread or guard with a mutex.
-class HttpClient {
+class HttpClient final : public HttpTransport {
 public:
 	explicit HttpClient(ClientConfig config = {});
-	~HttpClient();
+	~HttpClient() override;
 
 	HttpClient(HttpClient&&) noexcept;
 	HttpClient& operator=(HttpClient&&) noexcept;
@@ -49,7 +60,7 @@ public:
 
 	/// GET `path`. If `path` is an absolute URL (starts with http) it is
 	/// used verbatim; otherwise it is appended to `config().base_url`.
-	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const;
+	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
 	[[nodiscard]] const ClientConfig& config() const noexcept;
 

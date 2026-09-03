@@ -64,34 +64,34 @@ struct Error {
 		return code == ErrorCode::FeedUnavailable;
 	}
 
-	[[nodiscard]] static Error ok() { return {ErrorCode::Ok, ""}; }
+	[[nodiscard]] static Error ok() { return {ErrorCode::Ok, "", 0, ""}; }
 
 	[[nodiscard]] static Error network(std::string msg) {
-		return {ErrorCode::NetworkError, std::move(msg)};
+		return {ErrorCode::NetworkError, std::move(msg), 0, ""};
 	}
 
 	[[nodiscard]] static Error parse(std::string msg) {
-		return {ErrorCode::ParseError, std::move(msg)};
+		return {ErrorCode::ParseError, std::move(msg), 0, ""};
 	}
 
 	[[nodiscard]] static Error not_found(std::string msg) {
-		return {ErrorCode::NotFound, std::move(msg)};
+		return {ErrorCode::NotFound, std::move(msg), 0, ""};
 	}
 
 	[[nodiscard]] static Error feed_unavailable(std::string msg) {
-		return {ErrorCode::FeedUnavailable, std::move(msg)};
+		return {ErrorCode::FeedUnavailable, std::move(msg), 0, ""};
 	}
 
 	[[nodiscard]] static Error rate_limited(std::string msg) {
-		return {ErrorCode::RateLimited, std::move(msg)};
+		return {ErrorCode::RateLimited, std::move(msg), 0, ""};
 	}
 
 	[[nodiscard]] static Error server(std::string msg) {
-		return {ErrorCode::ServerError, std::move(msg)};
+		return {ErrorCode::ServerError, std::move(msg), 0, ""};
 	}
 
 	[[nodiscard]] static Error invalid_request(std::string msg) {
-		return {ErrorCode::InvalidRequest, std::move(msg)};
+		return {ErrorCode::InvalidRequest, std::move(msg), 0, ""};
 	}
 
 	/// Create an Error from an HTTP response status code and body. SPC's 404

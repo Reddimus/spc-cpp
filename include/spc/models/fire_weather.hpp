@@ -16,10 +16,18 @@
 
 namespace spc {
 
+enum class FireWeatherLayer : std::uint8_t {
+	Outlook,
+	DryThunderstorm,
+	WindLowHumidity,
+};
+
 struct FireWeatherFeature {
 	std::int32_t day = 0;
+	FireWeatherLayer layer{FireWeatherLayer::Outlook};
 	std::string label;		   ///< raw, e.g. "ELEV", "CRIT", "EXTM", "IDRT", "SDRT"
 	std::uint8_t severity = 0; ///< product-specific 1..3 (0 if unknown)
+	double probability = 0.0;  ///< day 3..8 probability normalized to [0,1]
 	std::vector<Polygon> rings;
 	std::string issued_at;
 	std::string valid_from;
@@ -39,5 +47,11 @@ struct FireWeatherPayload {
 /// Parse a fire-weather outlook (ArcGIS Esri or static GeoJSON). Throws
 /// std::runtime_error on malformed JSON.
 [[nodiscard]] FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day);
+
+/// Parse one known ArcGIS fire-weather layer. Day 1 and 2 use the layer kind
+/// to disambiguate numeric `dn` codes shared by categorical and dry-thunder
+/// products. Day 3 through 8 decode LABEL/label/dn as probabilities.
+[[nodiscard]] FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
+													FireWeatherLayer layer);
 
 } // namespace spc

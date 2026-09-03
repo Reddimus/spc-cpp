@@ -10,7 +10,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: |
@@ -20,10 +20,13 @@ jobs:
             libcurl4-openssl-dev
 
       - name: Build
-        run: make build
+        run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
 
       - name: Test
         run: make test
+
+      - name: Verify fixture provenance
+        run: make fixtures-check
 
       - name: Lint
         run: make lint
@@ -31,7 +34,7 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: |
@@ -39,7 +42,7 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$(brew --prefix curl)" >> "$GITHUB_ENV"
 
       - name: Build
-        run: make build
+        run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
 
       - name: Test
         run: make test
@@ -50,5 +53,77 @@ jobs:
   markdown-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
       - uses: DavidAnson/markdownlint-cli2-action@v23
+
+  sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev
+      - name: Build with address and undefined behavior sanitizers
+        run: >-
+          cmake -S . -B build-sanitized
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_LTO=OFF
+          -DSPC_ENABLE_SANITIZERS=ON
+          -DSPC_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-sanitized --parallel
+      - run: ctest --test-dir build-sanitized --output-on-failure
+
+  thread-sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev
+      - name: Build with ThreadSanitizer
+        run: >-
+          cmake -S . -B build-thread-sanitized
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_LTO=OFF
+          -DSPC_ENABLE_THREAD_SANITIZER=ON
+          -DSPC_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-thread-sanitized --parallel
+      - run: ctest --test-dir build-thread-sanitized --output-on-failure
+
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang-18 clang-tidy-18 cmake \
+            libc++-18-dev libc++abi-18-dev libcurl4-openssl-dev
+      - name: Run clang-tidy while compiling
+        run: >-
+          cmake -S . -B build-tidy
+          -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_CXX_FLAGS=-stdlib=libc++
+          -DSPC_ENABLE_CLANG_TIDY=ON
+          -DSPC_CLANG_TIDY_EXECUTABLE=/usr/bin/clang-tidy-18
+          -DSPC_ENABLE_LTO=OFF
+          -DSPC_BUILD_TESTS=OFF
+          -DSPC_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-tidy --parallel
+
+  consumer-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev
+      - run: ./tools/test_consumers.sh
