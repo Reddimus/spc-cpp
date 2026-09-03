@@ -102,12 +102,16 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang-tidy cmake libcurl4-openssl-dev
+            build-essential clang-18 clang-tidy-18 cmake \
+            libc++-18-dev libc++abi-18-dev libcurl4-openssl-dev
       - name: Run clang-tidy while compiling
         run: >-
           cmake -S . -B build-tidy
           -DCMAKE_BUILD_TYPE=Debug
+          -DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_CXX_FLAGS=-stdlib=libc++
           -DSPC_ENABLE_CLANG_TIDY=ON
+          -DSPC_CLANG_TIDY_EXECUTABLE=/usr/bin/clang-tidy-18
           -DSPC_ENABLE_LTO=OFF
           -DSPC_BUILD_TESTS=OFF
           -DSPC_BUILD_EXAMPLES=OFF
