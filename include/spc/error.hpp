@@ -8,7 +8,7 @@
 namespace spc {
 
 /// Error codes for SPC SDK operations.
-enum class ErrorCode : std::uint8_t {
+enum class ErrorCode {
 	Ok = 0,
 	NetworkError,
 	RateLimited,

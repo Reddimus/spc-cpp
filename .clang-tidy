@@ -2,6 +2,7 @@ Checks: >
   -*,
   bugprone-*,
   performance-*,
+  -performance-enum-size,
   portability-*,
   modernize-use-nullptr,
   modernize-use-override
