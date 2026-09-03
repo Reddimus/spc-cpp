@@ -20,7 +20,7 @@ jobs:
             libcurl4-openssl-dev
 
       - name: Build
-        run: make build
+        run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
 
       - name: Test
         run: make test
@@ -42,7 +42,7 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$(brew --prefix curl)" >> "$GITHUB_ENV"
 
       - name: Build
-        run: make build
+        run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
 
       - name: Test
         run: make test
