@@ -2,12 +2,17 @@
 /// @brief StaticFeed / ArcGIS / Archive client implementations.
 
 #include "spc/api.hpp"
+#include "spc/models/common.hpp"
 #include "spc/pagination.hpp"
 #include "spc/rate_limit.hpp"
 #include "spc/retry.hpp"
 
+#include <array>
+#include <cctype>
 #include <format>
+#include <memory>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace spc {
@@ -23,6 +28,130 @@ constexpr const char* kArcGisFirewx =
 constexpr const char* kArcGisMd = "https://mapservices.weather.noaa.gov/vector/rest/services/"
 								  "outlooks/spc_mesoscale_discussion/MapServer";
 constexpr const char* kIemBase = "https://mesonet.agron.iastate.edu/";
+
+enum class LayerProduct : std::uint8_t {
+	Categorical,
+	Probability,
+	ConditionalIntensity,
+	FireWeather,
+};
+
+struct LayerDescriptor {
+	LayerProduct product;
+	std::int32_t day;
+	std::string_view subtype;
+	std::int32_t id;
+	std::string_view name;
+};
+
+constexpr std::array<LayerDescriptor, 38> kLayers{{
+	{LayerProduct::Categorical, 1, "", 1, "Day 1 Categorical Outlook"},
+	{LayerProduct::ConditionalIntensity, 1, "tornado", 2, "Day 1 Tornado Conditional Intensity"},
+	{LayerProduct::Probability, 1, "tornado", 3, "Day 1 Probabilistic Tornado Outlook"},
+	{LayerProduct::ConditionalIntensity, 1, "hail", 4, "Day 1 Hail Conditional Intensity"},
+	{LayerProduct::Probability, 1, "hail", 5, "Day 1 Probabilistic Hail Outlook"},
+	{LayerProduct::ConditionalIntensity, 1, "wind", 6, "Day 1 Wind Conditional Intensity"},
+	{LayerProduct::Probability, 1, "wind", 7, "Day 1 Probabilistic Wind Outlook"},
+	{LayerProduct::Categorical, 2, "", 9, "Day 2 Categorical Outlook"},
+	{LayerProduct::ConditionalIntensity, 2, "tornado", 10, "Day 2 Tornado Conditional Intensity"},
+	{LayerProduct::Probability, 2, "tornado", 11, "Day 2 Probabilistic Tornado Outlook"},
+	{LayerProduct::ConditionalIntensity, 2, "hail", 12, "Day 2 Hail Conditional Intensity"},
+	{LayerProduct::Probability, 2, "hail", 13, "Day 2 Probabilistic Hail Outlook"},
+	{LayerProduct::ConditionalIntensity, 2, "wind", 14, "Day 2 Wind Conditional Intensity"},
+	{LayerProduct::Probability, 2, "wind", 15, "Day 2 Probabilistic Wind Outlook"},
+	{LayerProduct::Categorical, 3, "", 17, "Day 3 Categorical Outlook"},
+	{LayerProduct::ConditionalIntensity, 3, "severe", 18, "Day 3 Severe Conditional Intensity"},
+	{LayerProduct::Probability, 3, "severe", 19, "Day 3 Probabilistic Outlook"},
+	{LayerProduct::Probability, 4, "severe", 21, "Day 4 Probabilistic Outlook"},
+	{LayerProduct::Probability, 5, "severe", 22, "Day 5 Probabilistic Outlook"},
+	{LayerProduct::Probability, 6, "severe", 23, "Day 6 Probabilistic Outlook"},
+	{LayerProduct::Probability, 7, "severe", 24, "Day 7 Probabilistic Outlook"},
+	{LayerProduct::Probability, 8, "severe", 25, "Day 8 Probabilistic Outlook"},
+	{LayerProduct::FireWeather, 1, "outlook", 1, "Day 1 Outlook"},
+	{LayerProduct::FireWeather, 1, "dry-thunderstorm", 2, "Day 1 Outlook Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 2, "outlook", 4, "Day 2 Outlook"},
+	{LayerProduct::FireWeather, 2, "dry-thunderstorm", 5, "Day 2 Outlook Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 3, "dry-thunderstorm", 7, "Day 3 Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 3, "wind-low-humidity", 8, "Day 3 Winds and Low Humidity"},
+	{LayerProduct::FireWeather, 4, "dry-thunderstorm", 10, "Day 4 Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 4, "wind-low-humidity", 11, "Day 4 Winds and Low Humidity"},
+	{LayerProduct::FireWeather, 5, "dry-thunderstorm", 13, "Day 5 Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 5, "wind-low-humidity", 14, "Day 5 Winds and Low Humidity"},
+	{LayerProduct::FireWeather, 6, "dry-thunderstorm", 16, "Day 6 Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 6, "wind-low-humidity", 17, "Day 6 Winds and Low Humidity"},
+	{LayerProduct::FireWeather, 7, "dry-thunderstorm", 19, "Day 7 Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 7, "wind-low-humidity", 20, "Day 7 Winds and Low Humidity"},
+	{LayerProduct::FireWeather, 8, "dry-thunderstorm", 22, "Day 8 Dry Thunderstorm"},
+	{LayerProduct::FireWeather, 8, "wind-low-humidity", 23, "Day 8 Winds and Low Humidity"},
+}};
+
+const LayerDescriptor* find_layer(LayerProduct product, std::int32_t day,
+								  std::string_view subtype) {
+	for (const LayerDescriptor& descriptor : kLayers) {
+		if (descriptor.product == product && descriptor.day == day &&
+			descriptor.subtype == subtype) {
+			return &descriptor;
+		}
+	}
+	return nullptr;
+}
+
+std::shared_ptr<HttpTransport> usable_transport(std::shared_ptr<HttpTransport> transport) {
+	if (transport != nullptr) {
+		return transport;
+	}
+	return std::make_shared<HttpClient>();
+}
+
+std::string normalized_severe_hazard(std::int32_t day, const std::string& hazard) {
+	if (day == 3 && hazard == "any") {
+		return "severe";
+	}
+	return hazard;
+}
+
+std::string percent_encode(std::string_view value) {
+	constexpr char kHex[] = "0123456789ABCDEF";
+	std::string encoded;
+	encoded.reserve(value.size());
+	for (const unsigned char ch : value) {
+		if (std::isalnum(ch) != 0 || ch == '-' || ch == '.' || ch == '_' || ch == '~') {
+			encoded.push_back(static_cast<char>(ch));
+		} else {
+			encoded.push_back('%');
+			encoded.push_back(kHex[ch >> 4U]);
+			encoded.push_back(kHex[ch & 0x0FU]);
+		}
+	}
+	return encoded;
+}
+
+const char* service_base(ArcGISService service) {
+	switch (service) {
+		case ArcGISService::Outlooks:
+			return kArcGisOutlks;
+		case ArcGISService::FireWeather:
+			return kArcGisFirewx;
+		case ArcGISService::MesoscaleDiscussions:
+			return kArcGisMd;
+	}
+	return kArcGisOutlks;
+}
+
+Result<bool> inspect_arcgis_envelope(const std::string& body) {
+	const glz::expected<Json, std::string> root = detail::parse_root(body);
+	if (!root) {
+		return std::unexpected(Error::parse(root.error()));
+	}
+	const Json* error = detail::lookup(*root, "error");
+	if (error != nullptr && error->is_object()) {
+		const double raw_code = detail::json_number_or_numeric_string(*error, "code");
+		const int code = raw_code > 0.0 ? static_cast<int>(raw_code) : 400;
+		return std::unexpected(Error::from_response(code, body));
+	}
+	const Json* exceeded = detail::lookup(*root, "exceededTransferLimit");
+	return exceeded != nullptr && exceeded->is_boolean() && exceeded->get<bool>();
+}
 
 /// SPC 404 == "no active outlook" (FeedUnavailable). Map HTTP status to the
 /// right error; only a real body is handed to the parser.
@@ -41,21 +170,29 @@ Result<std::string> body_or_error(Result<HttpResponse> r) {
 // ===================== StaticFeedClient =====================
 
 struct StaticFeedClient::Impl {
-	HttpClient http;
+	std::shared_ptr<HttpTransport> http;
 	RetryPolicy retry;
-	explicit Impl(ClientConfig cfg) : http(std::move(cfg)) {}
+	explicit Impl(ClientConfig cfg) : http(std::make_shared<HttpClient>(std::move(cfg))) {}
+	explicit Impl(std::shared_ptr<HttpTransport> transport)
+		: http(usable_transport(std::move(transport))) {}
 };
 
 StaticFeedClient::StaticFeedClient(ClientConfig config)
 	: impl_(std::make_unique<Impl>(std::move(config))) {}
+StaticFeedClient::StaticFeedClient(std::shared_ptr<HttpTransport> transport)
+	: impl_(std::make_unique<Impl>(std::move(transport))) {}
 StaticFeedClient::~StaticFeedClient() = default;
 StaticFeedClient::StaticFeedClient(StaticFeedClient&&) noexcept = default;
 StaticFeedClient& StaticFeedClient::operator=(StaticFeedClient&&) noexcept = default;
 
 Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t day) {
+	if (day < 1 || day > 3) {
+		return std::unexpected(
+			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
+	}
 	const std::string url = std::format("{}day{}otlk_cat.nolyr.geojson", kStaticBase, day);
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http.get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -68,28 +205,40 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 
 Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 															   const std::string& hazard) {
-	// Day 1: dayNprobotlk_{torn,hail,wind}; Day 2: day2probotlk_any.
-	std::string tag = hazard;
-	if (hazard == "tornado") {
+	const std::string normalized = normalized_severe_hazard(day, hazard);
+	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, normalized);
+	if (descriptor == nullptr || day > 3) {
+		return std::unexpected(
+			Error::invalid_request("probabilistic outlook requires tornado, hail, or wind on day 1 "
+								   "or 2, or severe on day 3"));
+	}
+	std::string tag = normalized;
+	if (normalized == "tornado") {
 		tag = "torn";
 	}
-	const std::string url = std::format("{}day{}probotlk_{}.nolyr.geojson", kStaticBase, day, tag);
+	const std::string filename = day == 3 ? "day3otlk_prob.nolyr.geojson"
+										  : std::format("day{}otlk_{}.nolyr.geojson", day, tag);
+	const std::string url = std::string{kStaticBase} + filename;
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http.get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
 	try {
-		return parse_probabilistic(*body, day, hazard);
+		return parse_probabilistic(*body, day, normalized);
 	} catch (const std::exception& e) {
 		return std::unexpected(Error::parse(e.what()));
 	}
 }
 
 Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
+	if (day < 4 || day > 8) {
+		return std::unexpected(
+			Error::invalid_request("extended outlook day must be between 4 and 8"));
+	}
 	const std::string url = std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day);
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http.get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -103,9 +252,11 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
 // ===================== ArcGISClient =====================
 
 struct ArcGISClient::Impl {
-	HttpClient http;
+	std::shared_ptr<HttpTransport> http;
 	RetryPolicy retry;
-	explicit Impl(ClientConfig cfg) : http(std::move(cfg)) {}
+	explicit Impl(ClientConfig cfg) : http(std::make_shared<HttpClient>(std::move(cfg))) {}
+	explicit Impl(std::shared_ptr<HttpTransport> transport)
+		: http(usable_transport(std::move(transport))) {}
 
 	/// One paged query. Concatenated raw page bodies are returned; the
 	/// ArcGISPager advances on `exceededTransferLimit`.
@@ -114,26 +265,28 @@ struct ArcGISClient::Impl {
 		std::vector<std::string> pages;
 		ArcGISPager pager;
 		while (pager.has_more()) {
-			std::string url = std::format("{}/{}/query?where={}&outFields={}&returnGeometry={}&f={}"
-										  "&resultOffset={}&resultRecordCount={}",
-										  base, layer, p.where, p.out_fields,
-										  p.return_geometry ? "true" : "false", p.f, pager.offset(),
-										  pager.page_size());
+			std::string url =
+				std::format("{}/{}/query?where={}&outFields={}&returnGeometry={}&f={}"
+							"&resultOffset={}&resultRecordCount={}",
+							base, layer, percent_encode(p.where), percent_encode(p.out_fields),
+							p.return_geometry ? "true" : "false", percent_encode(p.f),
+							pager.offset(), pager.page_size());
 			if (!p.geometry.empty()) {
-				url += std::format("&geometry={}&geometryType={}&spatialRel={}", p.geometry,
-								   p.geometry_type, p.spatial_rel);
+				url += std::format("&geometry={}&geometryType={}&spatialRel={}",
+								   percent_encode(p.geometry), percent_encode(p.geometry_type),
+								   percent_encode(p.spatial_rel));
 			}
 			Result<std::string> body =
-				body_or_error(with_retry([&] { return http.get(url); }, retry));
+				body_or_error(with_retry([&] { return http->get(url); }, retry));
 			if (!body) {
 				return std::unexpected(body.error());
 			}
-			// Detect the ArcGIS truncation flag without a full parse.
-			const bool exceeded =
-				body->find("\"exceededTransferLimit\":true") != std::string::npos ||
-				body->find("\"exceededTransferLimit\": true") != std::string::npos;
+			const Result<bool> exceeded = inspect_arcgis_envelope(*body);
+			if (!exceeded) {
+				return std::unexpected(exceeded.error());
+			}
 			pages.push_back(std::move(*body));
-			pager.advance(exceeded);
+			pager.advance(*exceeded);
 		}
 		return pages;
 	}
@@ -141,57 +294,25 @@ struct ArcGISClient::Impl {
 
 ArcGISClient::ArcGISClient(ClientConfig config)
 	: impl_(std::make_unique<Impl>(std::move(config))) {}
+ArcGISClient::ArcGISClient(std::shared_ptr<HttpTransport> transport)
+	: impl_(std::make_unique<Impl>(std::move(transport))) {}
 ArcGISClient::~ArcGISClient() = default;
 ArcGISClient::ArcGISClient(ArcGISClient&&) noexcept = default;
 ArcGISClient& ArcGISClient::operator=(ArcGISClient&&) noexcept = default;
 
-namespace {
-
-// SPC_wx_outlks MapServer layer ids (documented layout).
-std::int32_t cat_layer(std::int32_t day) {
-	if (day == 1) {
-		return 1;
-	}
-	if (day == 2) {
-		return 9;
-	}
-	return 17; // day 3
-}
-
-std::int32_t prob_layer(std::int32_t day, const std::string& hazard) {
-	if (day == 1) {
-		if (hazard == "tornado") {
-			return 3;
-		}
-		if (hazard == "hail") {
-			return 5;
-		}
-		return 7; // wind
-	}
-	return 15; // day 2 "any"
-}
-
-std::int32_t fire_layer(std::int32_t day) {
-	// SPC_firewx: Day1 Outlook = layer 1, Day2 = 4, Day3 = 6 ...
-	if (day == 1) {
-		return 1;
-	}
-	if (day == 2) {
-		return 4;
-	}
-	return 6;
-}
-
-} // namespace
-
 Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t day) {
+	const LayerDescriptor* descriptor = find_layer(LayerProduct::Categorical, day, "");
+	if (descriptor == nullptr) {
+		return std::unexpected(
+			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
+	}
 	QueryParams p;
 	// Request GeoJSON so the VERBATIM parse_categorical (a GeoJSON-only
 	// walker, parity-critical) consumes it unchanged. parse_esri_rings is
 	// proven equivalent (test_arcgis) but the convective path must stay
 	// byte-for-byte the spc-data parser, so we feed it its native shape.
 	p.f = "geojson";
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, cat_layer(day), p);
+	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, p);
 	if (!pages) {
 		return std::unexpected(pages.error());
 	}
@@ -210,20 +331,26 @@ Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t d
 
 Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
 															 const std::string& hazard) {
+	const std::string normalized = normalized_severe_hazard(day, hazard);
+	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, normalized);
+	if (descriptor == nullptr || day > 3) {
+		return std::unexpected(
+			Error::invalid_request("probabilistic outlook requires tornado, hail, or wind on day 1 "
+								   "or 2, or severe on day 3"));
+	}
 	QueryParams p;
 	// GeoJSON for the verbatim parse_probabilistic (see query_categorical).
 	p.f = "geojson";
-	Result<std::vector<std::string>> pages =
-		impl_->paged(kArcGisOutlks, prob_layer(day, hazard), p);
+	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, p);
 	if (!pages) {
 		return std::unexpected(pages.error());
 	}
 	ProbOutlookPayload out;
 	out.day_offset = day;
-	out.hazard = hazard;
+	out.hazard = normalized;
 	for (const std::string& body : *pages) {
 		try {
-			ProbOutlookPayload pg = parse_probabilistic(body, day, hazard);
+			ProbOutlookPayload pg = parse_probabilistic(body, day, normalized);
 			out.features.insert(out.features.end(), pg.features.begin(), pg.features.end());
 		} catch (const std::exception& e) {
 			return std::unexpected(Error::parse(e.what()));
@@ -232,44 +359,100 @@ Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
 	return out;
 }
 
-Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) {
-	QueryParams p;
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisFirewx, fire_layer(day), p);
+Result<ConditionalIntensityPayload>
+ArcGISClient::query_conditional_intensity(std::int32_t day, const std::string& hazard) {
+	const std::string normalized = normalized_severe_hazard(day, hazard);
+	const LayerDescriptor* descriptor =
+		find_layer(LayerProduct::ConditionalIntensity, day, normalized);
+	if (descriptor == nullptr) {
+		return std::unexpected(
+			Error::invalid_request("conditional intensity requires tornado, hail, or wind on day 1 "
+								   "or 2, or severe on day 3"));
+	}
+	QueryParams params;
+	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, params);
 	if (!pages) {
 		return std::unexpected(pages.error());
 	}
-	FireWeatherPayload out;
-	out.day = day;
+	ConditionalIntensityPayload output;
+	output.day = day;
+	output.hazard = normalized;
 	for (const std::string& body : *pages) {
 		try {
-			FireWeatherPayload pg = parse_fire_weather(body, day);
-			out.features.insert(out.features.end(), pg.features.begin(), pg.features.end());
+			ConditionalIntensityPayload page = parse_conditional_intensity(body, day, normalized);
+			output.features.insert(output.features.end(), page.features.begin(),
+								   page.features.end());
 		} catch (const std::exception& e) {
 			return std::unexpected(Error::parse(e.what()));
+		}
+	}
+	return output;
+}
+
+Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) {
+	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, "severe");
+	if (descriptor == nullptr || day < 4) {
+		return std::unexpected(
+			Error::invalid_request("extended outlook day must be between 4 and 8"));
+	}
+	QueryParams params;
+	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, params);
+	if (!pages) {
+		return std::unexpected(pages.error());
+	}
+	Day48OutlookPayload output;
+	output.day = day;
+	for (const std::string& body : *pages) {
+		try {
+			Day48OutlookPayload page = parse_day4_8(body, day);
+			output.features.insert(output.features.end(), page.features.begin(),
+								   page.features.end());
+		} catch (const std::exception& e) {
+			return std::unexpected(Error::parse(e.what()));
+		}
+	}
+	return output;
+}
+
+Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) {
+	FireWeatherPayload out;
+	out.day = day;
+	const std::array<std::string_view, 2> subtypes =
+		day <= 2 ? std::array<std::string_view, 2>{"outlook", "dry-thunderstorm"}
+				 : std::array<std::string_view, 2>{"dry-thunderstorm", "wind-low-humidity"};
+	for (const std::string_view subtype : subtypes) {
+		const LayerDescriptor* descriptor = find_layer(LayerProduct::FireWeather, day, subtype);
+		if (descriptor == nullptr) {
+			return std::unexpected(
+				Error::invalid_request("fire-weather outlook day must be between 1 and 8"));
+		}
+		QueryParams params;
+		Result<std::vector<std::string>> pages =
+			impl_->paged(kArcGisFirewx, descriptor->id, params);
+		if (!pages) {
+			return std::unexpected(pages.error());
+		}
+		for (const std::string& body : *pages) {
+			try {
+				FireWeatherLayer layer = FireWeatherLayer::WindLowHumidity;
+				if (subtype == "outlook") {
+					layer = FireWeatherLayer::Outlook;
+				} else if (subtype == "dry-thunderstorm") {
+					layer = FireWeatherLayer::DryThunderstorm;
+				}
+				FireWeatherPayload page = parse_fire_weather(body, day, layer);
+				out.features.insert(out.features.end(), page.features.begin(), page.features.end());
+			} catch (const std::exception& e) {
+				return std::unexpected(Error::parse(e.what()));
+			}
 		}
 	}
 	return out;
 }
 
 Result<WatchPayload> ArcGISClient::query_active_watches() {
-	// Active watches live in the hazards service; expose the raw escape
-	// hatch consumers can also use. Layer 1 of SPC_wx_outlks is categorical,
-	// so watches use the dedicated query_layer path with the watch parser.
-	QueryParams p;
-	Result<std::vector<std::string>> pages = query_layer(0, p); // placeholder layer
-	if (!pages) {
-		return std::unexpected(pages.error());
-	}
-	WatchPayload out;
-	for (const std::string& body : *pages) {
-		try {
-			WatchPayload pg = parse_watches(body);
-			out.watches.insert(out.watches.end(), pg.watches.begin(), pg.watches.end());
-		} catch (const std::exception& e) {
-			return std::unexpected(Error::parse(e.what()));
-		}
-	}
-	return out;
+	return std::unexpected(Error::invalid_request(
+		"NOAA WWA polygons omit SPC watch parameters; use ArchiveClient::watches()"));
 }
 
 Result<MesoscalePayload> ArcGISClient::query_active_md() {
@@ -302,18 +485,26 @@ Result<StormReportPayload> ArcGISClient::query_storm_reports() {
 
 Result<std::vector<std::string>> ArcGISClient::query_layer(std::int32_t layer_id,
 														   const QueryParams& params) {
-	return impl_->paged(kArcGisOutlks, layer_id, params);
+	return query_layer(ArcGISService::Outlooks, layer_id, params);
+}
+
+Result<std::vector<std::string>>
+ArcGISClient::query_layer(ArcGISService service, std::int32_t layer_id, const QueryParams& params) {
+	if (layer_id < 0) {
+		return std::unexpected(Error::invalid_request("ArcGIS layer id must be non-negative"));
+	}
+	return impl_->paged(service_base(service), layer_id, params);
 }
 
 // ===================== ArchiveClient =====================
 
 struct ArchiveClient::Impl {
-	HttpClient http;
+	std::shared_ptr<HttpTransport> http;
 	RetryPolicy retry;
 	RateLimiter limiter;
 
 	explicit Impl(ClientConfig cfg)
-		: http(std::move(cfg)), retry([] {
+		: http(std::make_shared<HttpClient>(std::move(cfg))), retry([] {
 			  // Conservative: IEM is a courtesy third party.
 			  RetryPolicy r;
 			  r.max_attempts = 4;
@@ -321,10 +512,21 @@ struct ArchiveClient::Impl {
 			  return r;
 		  }()),
 		  limiter(RateLimiter::Config{}) {}
+
+	explicit Impl(std::shared_ptr<HttpTransport> transport)
+		: http(usable_transport(std::move(transport))), retry([] {
+			  RetryPolicy policy;
+			  policy.max_attempts = 4;
+			  policy.initial_delay = std::chrono::milliseconds{500};
+			  return policy;
+		  }()),
+		  limiter(RateLimiter::Config{}) {}
 };
 
 ArchiveClient::ArchiveClient(ClientConfig config)
 	: impl_(std::make_unique<Impl>(std::move(config))) {}
+ArchiveClient::ArchiveClient(std::shared_ptr<HttpTransport> transport)
+	: impl_(std::make_unique<Impl>(std::move(transport))) {}
 ArchiveClient::~ArchiveClient() = default;
 ArchiveClient::ArchiveClient(ArchiveClient&&) noexcept = default;
 ArchiveClient& ArchiveClient::operator=(ArchiveClient&&) noexcept = default;
@@ -338,7 +540,7 @@ Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
 		url += std::format("?ts={}", ts);
 	}
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http.get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -349,6 +551,7 @@ Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
 	}
 }
 
+// NOLINTBEGIN(bugprone-easily-swappable-parameters)
 Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start_iso,
 														const std::string& end_iso,
 														const std::string& wfo) {
@@ -361,7 +564,7 @@ Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start
 		url += std::format("&wfo={}", wfo);
 	}
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http.get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -371,5 +574,6 @@ Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start
 		return std::unexpected(Error::parse(e.what()));
 	}
 }
+// NOLINTEND(bugprone-easily-swappable-parameters)
 
 } // namespace spc

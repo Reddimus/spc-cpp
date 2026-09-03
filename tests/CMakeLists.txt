@@ -1,11 +1,12 @@
 add_executable(spc_tests
+    test_client.cpp
     test_geometry.cpp
     test_parser.cpp
     test_corpus.cpp
     test_arcgis.cpp
 )
 target_link_libraries(spc_tests PRIVATE
-    spc_core spc_models spc_api
+    spc_api
     GTest::gtest_main
 )
 target_compile_definitions(spc_tests PRIVATE

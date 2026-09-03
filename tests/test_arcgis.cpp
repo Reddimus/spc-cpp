@@ -107,7 +107,6 @@ TEST(ArcGISParity, EsriRingsMatchGeoJsonForDay1Categorical) {
 	constexpr double kSkip = 5.0e-5;
 
 	std::size_t esri_bands = 0;
-	std::size_t probe_total = 0;
 	std::size_t probe_agree = 0;
 	std::size_t probe_compared = 0;
 	for (const glz::generic& feat : feats->get_array()) {
@@ -158,7 +157,6 @@ TEST(ArcGISParity, EsriRingsMatchGeoJsonForDay1Categorical) {
 			for (int iy = 0; iy <= kN; ++iy) {
 				const double px = minx + (maxx - minx) * (static_cast<double>(ix) / kN);
 				const double py = miny + (maxy - miny) * (static_cast<double>(iy) / kN);
-				++probe_total;
 				// Skip the fuzzy ~1 m boundary band of EITHER encoding.
 				if (dist_to_boundary(px, py, g->rings) < kSkip ||
 					dist_to_boundary(px, py, esri_rings) < kSkip) {
@@ -205,6 +203,15 @@ TEST(NetNewModels, Day48ParsesStaticGeoJson) {
 	}
 }
 
+TEST(NetNewModels, Day48ParsesNonemptySyntheticArcGisResponse) {
+	const Day48OutlookPayload payload =
+		parse_day4_8(slurp("arcgis_day4_8_nonempty.synthetic.json"), 4);
+	ASSERT_EQ(payload.features.size(), 1u);
+	EXPECT_EQ(payload.features[0].day, 4);
+	EXPECT_DOUBLE_EQ(payload.features[0].probability, 0.15);
+	EXPECT_FALSE(payload.features[0].rings.empty());
+}
+
 TEST(NetNewModels, ConditionalIntensityCigMapper) {
 	EXPECT_EQ(cig_severity_from_label("CIG1"), 1);
 	EXPECT_EQ(cig_severity_from_label("CIG2"), 2);
@@ -225,10 +232,32 @@ TEST(NetNewModels, FireWeatherOwnSeverityMapper) {
 	EXPECT_EQ(fire_severity_from_label("SLGT"), 0); // not categorical
 	const FireWeatherPayload p = parse_fire_weather(slurp("arcgis_day1_fire_weather.esri.json"), 1);
 	EXPECT_EQ(p.day, 1);
-	EXPECT_GT(p.features.size(), 0u);
+	ASSERT_EQ(p.features.size(), 3u);
+	EXPECT_EQ(p.features[0].label, "ELEV");
+	EXPECT_EQ(p.features[0].severity, 1);
+	EXPECT_EQ(p.features[1].label, "CRIT");
+	EXPECT_EQ(p.features[1].severity, 2);
+	EXPECT_EQ(p.features[2].label, "EXTM");
+	EXPECT_EQ(p.features[2].severity, 3);
 	for (const FireWeatherFeature& f : p.features) {
 		EXPECT_FALSE(f.rings.empty());
 	}
+}
+
+TEST(NetNewModels, FireWeatherDryThunderstormCodesUseTheirOwnLabels) {
+	const std::string body = R"({"features":[
+		{"attributes":{"dn":5},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
+		{"attributes":{"dn":8},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}}
+	]})";
+	const FireWeatherPayload payload =
+		parse_fire_weather(body, 1, FireWeatherLayer::DryThunderstorm);
+	ASSERT_EQ(payload.features.size(), 2u);
+	EXPECT_EQ(payload.features[0].label, "IDRT");
+	EXPECT_EQ(payload.features[0].layer, FireWeatherLayer::DryThunderstorm);
+	EXPECT_EQ(payload.features[0].severity, 0);
+	EXPECT_EQ(payload.features[1].label, "SDRT");
+	EXPECT_EQ(payload.features[1].layer, FireWeatherLayer::DryThunderstorm);
+	EXPECT_EQ(payload.features[1].severity, 0);
 }
 
 TEST(NetNewModels, MesoscaleRawTextOnly) {

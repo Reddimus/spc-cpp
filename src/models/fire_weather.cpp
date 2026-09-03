@@ -44,6 +44,30 @@ std::string ts_any(const Json& props, const char* upper, const char* lower) {
 	return v;
 }
 
+std::string label_from_dn(const Json& props, FireWeatherLayer layer) {
+	const double dn = detail::json_number_or_numeric_string(props, "dn");
+	if (layer == FireWeatherLayer::Outlook) {
+		if (dn == 5.0) {
+			return "ELEV";
+		}
+		if (dn == 8.0) {
+			return "CRIT";
+		}
+		if (dn == 10.0) {
+			return "EXTM";
+		}
+	}
+	if (layer == FireWeatherLayer::DryThunderstorm) {
+		if (dn == 5.0) {
+			return "IDRT";
+		}
+		if (dn == 8.0) {
+			return "SDRT";
+		}
+	}
+	return {};
+}
+
 } // namespace
 
 std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
@@ -61,6 +85,11 @@ std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
 }
 
 FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day) {
+	return parse_fire_weather(body, day, FireWeatherLayer::Outlook);
+}
+
+FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
+									  FireWeatherLayer layer) {
 	const Json root = parse_root_or_throw(body);
 	FireWeatherPayload payload;
 	payload.day = day;
@@ -76,9 +105,13 @@ FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day) {
 		}
 		FireWeatherFeature f;
 		f.day = day;
+		f.layer = layer;
 		f.label = detail::json_string(*props, "LABEL");
 		if (f.label.empty()) {
 			f.label = detail::json_string(*props, "label");
+		}
+		if (f.label.empty()) {
+			f.label = label_from_dn(*props, layer);
 		}
 		f.severity = fire_severity_from_label(f.label);
 		f.issued_at = ts_any(*props, "ISSUE", "issue");
