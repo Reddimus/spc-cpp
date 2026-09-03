@@ -8,6 +8,7 @@ NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.performancecores 2>/dev/null 
 
 .PHONY: all build debug test lint clean configure configure-debug help format pre-commit \
 	install-hooks coverage lint-md format-md \
+	test-consumers \
 	run-static_feed run-arcgis run-archive
 
 all: build
@@ -28,6 +29,9 @@ debug: configure-debug
 
 test: build
 	@cd $(BUILD_DIR) && ctest --output-on-failure
+
+test-consumers:
+	@./tools/test_consumers.sh
 
 lint:
 	@if command -v clang-format >/dev/null 2>&1; then \

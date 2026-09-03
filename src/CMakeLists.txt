@@ -9,6 +9,7 @@ add_library(spc_core STATIC
     core/geometry.cpp
     core/rate_limit.cpp
 )
+spc_configure_target(spc_core)
 target_compile_features(spc_core PUBLIC cxx_std_23)
 target_include_directories(spc_core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -19,6 +20,7 @@ target_include_directories(spc_core PUBLIC
 add_library(spc_http STATIC
     http/client.cpp
 )
+spc_configure_target(spc_http)
 target_link_libraries(spc_http PUBLIC spc_core CURL::libcurl)
 target_include_directories(spc_http PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -34,6 +36,7 @@ add_library(spc_models STATIC
     models/mesoscale.cpp
     models/storm_report.cpp
 )
+spc_configure_target(spc_models)
 target_link_libraries(spc_models PUBLIC spc_core)
 target_include_directories(spc_models PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
@@ -45,6 +48,7 @@ target_include_directories(spc_models PUBLIC
 add_library(spc_api STATIC
     api/client.cpp
 )
+spc_configure_target(spc_api)
 target_link_libraries(spc_api PUBLIC spc_core spc_http spc_models)
 target_include_directories(spc_api PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>

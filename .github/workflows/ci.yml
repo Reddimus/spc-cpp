@@ -10,7 +10,7 @@ jobs:
   build-linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: |
@@ -31,7 +31,7 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
 
       - name: Install dependencies
         run: |
@@ -50,5 +50,54 @@ jobs:
   markdown-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7.0.1
       - uses: DavidAnson/markdownlint-cli2-action@v23
+
+  sanitizer:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev
+      - name: Build with address and undefined behavior sanitizers
+        run: >-
+          cmake -S . -B build-sanitized
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_LTO=OFF
+          -DSPC_ENABLE_SANITIZERS=ON
+          -DSPC_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-sanitized --parallel
+      - run: ctest --test-dir build-sanitized --output-on-failure
+
+  clang-tidy:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang-tidy cmake libcurl4-openssl-dev
+      - name: Run clang-tidy while compiling
+        run: >-
+          cmake -S . -B build-tidy
+          -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_CLANG_TIDY=ON
+          -DSPC_ENABLE_LTO=OFF
+          -DSPC_BUILD_TESTS=OFF
+          -DSPC_BUILD_EXAMPLES=OFF
+      - run: cmake --build build-tidy --parallel
+
+  consumer-smoke:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev
+      - run: ./tools/test_consumers.sh

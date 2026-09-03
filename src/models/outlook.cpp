@@ -100,8 +100,9 @@ CategoricalOutlookPayload parse_categorical(std::string_view body, std::int32_t 
 	return payload;
 }
 
-ProbOutlookPayload parse_probabilistic(std::string_view body, std::int32_t day_offset,
-									   std::string hazard) {
+ProbOutlookPayload parse_probabilistic(
+	std::string_view body, std::int32_t day_offset,
+	std::string hazard) { // NOLINT(performance-unnecessary-value-param): parity signature
 	const Json root = parse_root_or_throw(body);
 	ProbOutlookPayload payload;
 	payload.day_offset = day_offset;
