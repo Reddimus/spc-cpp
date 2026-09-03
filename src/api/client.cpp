@@ -261,7 +261,8 @@ struct ArcGISClient::Impl {
 	/// One paged query. Concatenated raw page bodies are returned; the
 	/// ArcGISPager advances on `exceededTransferLimit`.
 	Result<std::vector<std::string>> paged(const char* base, std::int32_t layer,
-										   const QueryParams& p) {
+										   const QueryParams& p,
+										   std::string_view out_spatial_reference = {}) {
 		std::vector<std::string> pages;
 		ArcGISPager pager;
 		while (pager.has_more()) {
@@ -275,6 +276,9 @@ struct ArcGISClient::Impl {
 				url += std::format("&geometry={}&geometryType={}&spatialRel={}",
 								   percent_encode(p.geometry), percent_encode(p.geometry_type),
 								   percent_encode(p.spatial_rel));
+			}
+			if (!out_spatial_reference.empty()) {
+				url += "&outSR=" + percent_encode(out_spatial_reference);
 			}
 			Result<std::string> body =
 				body_or_error(with_retry([&] { return http->get(url); }, retry));
@@ -426,9 +430,10 @@ Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) {
 			return std::unexpected(
 				Error::invalid_request("fire-weather outlook day must be between 1 and 8"));
 		}
-		QueryParams params;
+		// Fire-weather layers default to Web Mercator. The public model uses
+		// longitude/latitude, so ask ArcGIS to transform geometry before parsing.
 		Result<std::vector<std::string>> pages =
-			impl_->paged(kArcGisFirewx, descriptor->id, params);
+			impl_->paged(kArcGisFirewx, descriptor->id, {}, "4326");
 		if (!pages) {
 			return std::unexpected(pages.error());
 		}

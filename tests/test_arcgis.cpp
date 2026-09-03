@@ -260,6 +260,20 @@ TEST(NetNewModels, FireWeatherDryThunderstormCodesUseTheirOwnLabels) {
 	EXPECT_EQ(payload.features[1].severity, 0);
 }
 
+TEST(NetNewModels, FireWeatherOmitsNoRiskSentinelPolygons) {
+	const std::string body = R"({"features":[
+		{"attributes":{"dn":0},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
+		{"attributes":{"LABEL":"Probability Too Low"},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}},
+		{"attributes":{"dn":5},"geometry":{"rings":[[[4,1],[5,1],[5,0],[4,0],[4,1]]]}}
+	]})";
+
+	const FireWeatherPayload payload =
+		parse_fire_weather(body, 4, FireWeatherLayer::DryThunderstorm);
+
+	ASSERT_EQ(payload.features.size(), 1u);
+	EXPECT_EQ(payload.features[0].label, "IDRT");
+}
+
 TEST(NetNewModels, MesoscaleRawTextOnly) {
 	const MesoscalePayload p =
 		parse_mesoscale_discussions(slurp("arcgis_mesoscale_discussion.esri.json"));

@@ -14,4 +14,4 @@ target_compile_definitions(spc_tests PRIVATE
 )
 target_compile_options(spc_tests PRIVATE -Wall -Wextra -Wpedantic)
 include(GoogleTest)
-gtest_discover_tests(spc_tests)
+gtest_discover_tests(spc_tests DISCOVERY_TIMEOUT 30)

@@ -145,6 +145,8 @@ TEST(ArcGISClientRouting, CombinesBothPublishedFireWeatherLayers) {
 	ASSERT_EQ(transport->requests.size(), 2u);
 	EXPECT_NE(transport->requests[0].find("/7/query?"), std::string::npos);
 	EXPECT_NE(transport->requests[1].find("/8/query?"), std::string::npos);
+	EXPECT_NE(transport->requests[0].find("outSR=4326"), std::string::npos);
+	EXPECT_NE(transport->requests[1].find("outSR=4326"), std::string::npos);
 }
 
 TEST(ArcGISClientRouting, PreservesLabelsFromBothDayOneFireProducts) {
