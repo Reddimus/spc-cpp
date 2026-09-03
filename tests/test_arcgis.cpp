@@ -279,7 +279,9 @@ TEST(NetNewModels, FireWeatherOmitsNoRiskSentinelPolygons) {
 TEST(NetNewModels, ExtendedFireWeatherNormalizesPublishedProbabilities) {
 	const std::string body = R"({"features":[
 		{"attributes":{"label":"0.40","dn":40},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
-		{"attributes":{"dn":"15"},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}}
+		{"attributes":{"dn":"15"},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}},
+		{"attributes":{"dn":150},"geometry":{"rings":[[[4,1],[5,1],[5,0],[4,0],[4,1]]]}},
+		{"attributes":{"dn":-5},"geometry":{"rings":[[[6,1],[7,1],[7,0],[6,0],[6,1]]]}}
 	]})";
 
 	const FireWeatherPayload payload =
