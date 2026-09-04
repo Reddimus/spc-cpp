@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-04
+
 ### Changed
 
 - **HTTP 404 now says which kind of 404 it was.** `ErrorCode::FeedUnavailable`

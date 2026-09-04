@@ -90,7 +90,7 @@ FetchContent consumers can pin the release:
 include(FetchContent)
 FetchContent_Declare(spc_cpp
     GIT_REPOSITORY https://github.com/Reddimus/spc-cpp.git
-    GIT_TAG v0.2.0
+    GIT_TAG v0.3.0
 )
 FetchContent_MakeAvailable(spc_cpp)
 target_link_libraries(myapp PRIVATE spc::spc)
