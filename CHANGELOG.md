@@ -6,6 +6,29 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **HTTP 404 now says which kind of 404 it was.** `ErrorCode::FeedUnavailable`
+  ("no active outlook — clear the rows") is produced only by
+  `StaticFeedClient`, the one feed where SPC uses 404 that way. A 404 from the
+  ArcGIS MapServer or from IEM — a retired product, a renamed service path, a
+  wrong base URL — is now `ErrorCode::NotFound`, which was previously
+  unreachable. A logical ArcGIS `{"error":{"code":404}}` envelope, which is how
+  a renamed MapServer path is actually reported (over HTTP 200), maps to
+  `NotFound` as well. Consumers that branch on `is_feed_unavailable()` for
+  `ArcGISClient` or `ArchiveClient` results should treat `NotFound` as a fault
+  and alert on it instead of clearing rows.
+- `Error::from_response` takes a trailing `Feed404` argument stating what a 404
+  means for the feed that answered. It defaults to `Feed404::NotFound`, so
+  existing calls keep compiling and get the safe reading.
+
+### Added
+
+- `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the
+  ArcGIS code in `Error::http_status` only while that code is HTTP-shaped
+  (100..599) and records it in `Error::detail`, so a code such as 1000 can no
+  longer masquerade as an HTTP status.
+
 ## [0.2.0] - 2026-09-03
 
 ### Added

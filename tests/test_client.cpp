@@ -249,6 +249,85 @@ TEST(ArcGISClientPaging, ReturnsLogicalArcGISErrorsReportedWithHttp200) {
 	EXPECT_EQ(result.error().message, "Invalid or missing input parameters.");
 }
 
+// ===== HTTP 404 trust boundary =====
+//
+// SPC's static products answer 404 with an HTML page when there is no active
+// outlook (verified live: a retired www.spc.noaa.gov outlook path returns
+// HTTP 404 text/html). Every other feed's 404 is a genuine fault. The ArcGIS
+// MapServer reports a retired service path as HTTP 200 with a logical
+// `{"error":{"code":404}}` envelope (verified live against a renamed service).
+
+TEST(Feed404Semantics, StaticFeedReadsSpcHtml404AsNoActiveOutlook) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{404, "<html><title>404 Not Found</title></html>", {}}};
+	StaticFeedClient client{transport};
+
+	const Result<CategoricalOutlookPayload> result = client.day_categorical(1);
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::FeedUnavailable);
+	EXPECT_TRUE(result.error().is_feed_unavailable());
+	EXPECT_EQ(result.error().http_status, 404);
+}
+
+TEST(Feed404Semantics, ArcGisTransport404IsAGenuineNotFound) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{404, "<html>not found</html>", {}}};
+	ArcGISClient client{transport};
+
+	const Result<CategoricalOutlookPayload> result = client.query_categorical(1);
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::NotFound);
+	EXPECT_FALSE(result.error().is_feed_unavailable());
+}
+
+TEST(Feed404Semantics, ArcGisLogicalNotFoundIsAGenuineNotFound) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	// Live shape for a renamed / retired MapServer path.
+	transport->responses = {
+		{200,
+		 R"({"error":{"code":404,"message":"Service outlooks/SPC_wx_outlks_RETIRED/MapServer not found ","details":[]}})",
+		 {}},
+	};
+	ArcGISClient client{transport};
+
+	const Result<CategoricalOutlookPayload> result = client.query_categorical(1);
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::NotFound);
+	EXPECT_FALSE(result.error().is_feed_unavailable());
+	EXPECT_NE(result.error().message.find("not found"), std::string::npos);
+}
+
+TEST(Feed404Semantics, ArcGisCodeThatIsNotAnHttpStatusStaysOutOfHttpStatus) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {
+		{200, R"({"error":{"code":1000,"message":"Unable to complete operation.","details":[]}})", {}},
+	};
+	ArcGISClient client{transport};
+
+	const Result<std::vector<std::string>> result =
+		client.query_layer(ArcGISService::Outlooks, 1, {});
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
+	EXPECT_EQ(result.error().http_status, 0);
+	EXPECT_NE(result.error().detail.find("1000"), std::string::npos);
+}
+
+TEST(Feed404Semantics, ArchiveTransport404IsAGenuineNotFound) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{404, "<html>gone</html>", {}}};
+	ArchiveClient client{transport};
+
+	const Result<WatchPayload> result = client.watches();
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::NotFound);
+	EXPECT_FALSE(result.error().is_feed_unavailable());
+}
+
 TEST(ArcGISClientRouting, ActiveWatchesDirectCallersToTheIemClient) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	ArcGISClient client{transport};

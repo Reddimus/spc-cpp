@@ -147,22 +147,28 @@ Result<bool> inspect_arcgis_envelope(const std::string& body) {
 	if (error != nullptr && error->is_object()) {
 		const double raw_code = detail::json_number_or_numeric_string(*error, "code");
 		const int code = raw_code > 0.0 ? static_cast<int>(raw_code) : 400;
-		return std::unexpected(Error::from_response(code, body));
+		// A logical ArcGIS failure travels over HTTP 200, so it must not go
+		// through the HTTP status mapper: an ArcGIS code 404 (renamed or
+		// retired service path) is a genuine NotFound, and a code like 1000
+		// is not an HTTP status at all.
+		return std::unexpected(Error::from_arcgis(code, body));
 	}
 	const Json* exceeded = detail::lookup(*root, "exceededTransferLimit");
 	return exceeded != nullptr && exceeded->is_boolean() && exceeded->get<bool>();
 }
 
-/// SPC 404 == "no active outlook" (FeedUnavailable). Map HTTP status to the
-/// right error; only a real body is handed to the parser.
-Result<std::string> body_or_error(Result<HttpResponse> r) {
+/// Map HTTP status to the right error; only a real body is handed to the
+/// parser. `semantics` is the trust boundary: only the SPC static feeds may
+/// read a 404 as "no active outlook" (FeedUnavailable). For every other host
+/// a 404 is a retired or wrong URL, i.e. NotFound.
+Result<std::string> body_or_error(Result<HttpResponse> r, Feed404 semantics) {
 	if (!r) {
 		return std::unexpected(r.error());
 	}
 	if (r->status_code == 200) {
 		return std::move(r->body);
 	}
-	return std::unexpected(Error::from_response(r->status_code, r->body));
+	return std::unexpected(Error::from_response(r->status_code, r->body, semantics));
 }
 
 } // namespace
@@ -192,7 +198,8 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 	}
 	const std::string url = std::format("{}day{}otlk_cat.nolyr.geojson", kStaticBase, day);
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
+					  Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -220,7 +227,8 @@ Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 										  : std::format("day{}otlk_{}.nolyr.geojson", day, tag);
 	const std::string url = std::string{kStaticBase} + filename;
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
+					  Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -238,7 +246,8 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
 	}
 	const std::string url = std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day);
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
+					  Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -281,7 +290,7 @@ struct ArcGISClient::Impl {
 				url += "&outSR=" + percent_encode(out_spatial_reference);
 			}
 			Result<std::string> body =
-				body_or_error(with_retry([&] { return http->get(url); }, retry));
+				body_or_error(with_retry([&] { return http->get(url); }, retry), Feed404::NotFound);
 			if (!body) {
 				return std::unexpected(body.error());
 			}
@@ -545,7 +554,8 @@ Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
 		url += std::format("?ts={}", ts);
 	}
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
+					  Feed404::NotFound);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -569,7 +579,8 @@ Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start
 		url += std::format("&wfo={}", wfo);
 	}
 	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
+					  Feed404::NotFound);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
