@@ -5,7 +5,7 @@
 /// Set from `PROJECT_VERSION` by the build. The fallback keeps the header
 /// usable when it is read outside the project's own CMake targets.
 #ifndef SPC_VERSION_STRING
-#define SPC_VERSION_STRING "0.2.0"
+#define SPC_VERSION_STRING "0.3.0"
 #endif
 
 #include <chrono>
