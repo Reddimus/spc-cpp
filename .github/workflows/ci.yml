@@ -24,7 +24,10 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake pkg-config clang-format \
-            libcurl4-openssl-dev
+            libcurl4-openssl-dev locales
+          # The LocaleIndependence tests need a comma-decimal locale; without
+          # one they GTEST_SKIP and the regression they guard goes unchecked.
+          sudo locale-gen de_DE.UTF-8
 
       - name: Build
         run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
@@ -71,7 +74,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
       - name: Build with address and undefined behavior sanitizers
         run: >-
           cmake -S . -B build-sanitized
@@ -90,7 +94,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
       - name: Build with ThreadSanitizer
         run: >-
           cmake -S . -B build-thread-sanitized
@@ -132,5 +137,6 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
       - run: ./tools/test_consumers.sh

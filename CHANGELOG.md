@@ -115,6 +115,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   categorical, four probabilistic). The test named for probabilistic parity
   only ever opened the GeoJSON side, so `parse_esri_rings` was pinned by one
   categorical layer.
+- The Linux CI jobs generate `de_DE.UTF-8`, so the locale regression tests run
+  there instead of skipping.
 - `ci.yml` declares `permissions: contents: read` at the top level — it runs on
   `pull_request` and executes third-party build scripts — and pins both actions
   to full commit SHAs instead of mutable tags.
