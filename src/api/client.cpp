@@ -138,7 +138,19 @@ const char* service_base(ArcGISService service) {
 	return kArcGisOutlks;
 }
 
-Result<bool> inspect_arcgis_envelope(const std::string& body) {
+/// What `paged()` needs from one ArcGIS response envelope: whether the server
+/// truncated the result, and how many records it actually returned.
+struct ArcGISEnvelope {
+	std::int32_t feature_count{0};
+	bool exceeded_transfer_limit{false};
+};
+
+bool envelope_flag(const Json& root, const char* key) {
+	const Json* flag = detail::lookup(root, key);
+	return flag != nullptr && flag->is_boolean() && flag->get<bool>();
+}
+
+Result<ArcGISEnvelope> inspect_arcgis_envelope(const std::string& body) {
 	const glz::expected<Json, std::string> root = detail::parse_root(body);
 	if (!root) {
 		return std::unexpected(Error::parse(root.error()));
@@ -153,8 +165,22 @@ Result<bool> inspect_arcgis_envelope(const std::string& body) {
 		// is not an HTTP status at all.
 		return std::unexpected(Error::from_arcgis(code, body));
 	}
-	const Json* exceeded = detail::lookup(*root, "exceededTransferLimit");
-	return exceeded != nullptr && exceeded->is_boolean() && exceeded->get<bool>();
+	ArcGISEnvelope envelope;
+	// Verified live against SPC_wx_outlks layer 1 with resultRecordCount=1:
+	// `f=json` carries the flag at the root, `f=geojson` carries it at the
+	// root AND under `properties`. Read both so either shape is honoured.
+	envelope.exceeded_transfer_limit = envelope_flag(*root, "exceededTransferLimit");
+	if (!envelope.exceeded_transfer_limit) {
+		const Json* properties = detail::lookup(*root, "properties");
+		envelope.exceeded_transfer_limit =
+			properties != nullptr && envelope_flag(*properties, "exceededTransferLimit");
+	}
+	// Esri (`f=json`) and GeoJSON (`f=geojson`) both name the array `features`.
+	const Json* features = detail::lookup(*root, "features");
+	if (features != nullptr && features->is_array()) {
+		envelope.feature_count = static_cast<std::int32_t>(features->get_array().size());
+	}
+	return envelope;
 }
 
 /// Map HTTP status to the right error; only a real body is handed to the
@@ -294,12 +320,21 @@ struct ArcGISClient::Impl {
 			if (!body) {
 				return std::unexpected(body.error());
 			}
-			const Result<bool> exceeded = inspect_arcgis_envelope(*body);
-			if (!exceeded) {
-				return std::unexpected(exceeded.error());
+			const Result<ArcGISEnvelope> envelope = inspect_arcgis_envelope(*body);
+			if (!envelope) {
+				return std::unexpected(envelope.error());
+			}
+			if (envelope->exceeded_transfer_limit && envelope->feature_count == 0) {
+				// The offset would never move: paging cannot converge.
+				return std::unexpected(Error::server(
+					"ArcGIS reported a truncated page containing no records"));
 			}
 			pages.push_back(std::move(*body));
-			pager.advance(*exceeded);
+			pager.advance(envelope->feature_count, envelope->exceeded_transfer_limit);
+		}
+		if (pager.page_limit_reached()) {
+			return std::unexpected(Error::server(std::format(
+				"ArcGIS paging did not converge within {} pages", pager.max_pages())));
 		}
 		return pages;
 	}

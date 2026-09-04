@@ -22,6 +22,21 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   means for the feed that answered. It defaults to `Feed404::NotFound`, so
   existing calls keep compiling and get the safe reading.
 
+### Fixed
+
+- **ArcGIS paging advanced `resultOffset` by the requested page size, not by
+  the records the server returned.** ArcGIS clamps `resultRecordCount` to the
+  layer's own `maxRecordCount`, so a truncated page can be shorter than the
+  2000 requested; the offset then skipped the gap and the caller got a
+  successful result with a silent hole. `ArcGISPager::advance()` now takes the
+  returned record count.
+- ArcGIS paging is bounded. A page that reports truncation while carrying no
+  records, and a server that never stops reporting truncation, now fail with
+  `ErrorCode::ServerError` after at most `ArcGISPager::max_pages()` (100)
+  requests instead of looping forever and growing memory without bound.
+  `ArcGISPager::offset()` is a `std::int64_t`, so the arithmetic cannot
+  overflow.
+
 ### Added
 
 - `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the

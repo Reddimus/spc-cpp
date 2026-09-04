@@ -1,5 +1,7 @@
 #include "spc/api.hpp"
+#include "spc/pagination.hpp"
 
+#include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
@@ -29,6 +31,32 @@ public:
 HttpResponse empty_feature_collection() {
 	return {200, R"({"type":"FeatureCollection","features":[],"exceededTransferLimit":false})", {}};
 }
+
+/// A FeatureCollection of `count` placeholder features that still reports
+/// truncation — the shape ArcGIS returns when a layer's own maxRecordCount is
+/// below the requested resultRecordCount.
+std::string truncated_page(std::int32_t count) {
+	std::string body = R"({"type":"FeatureCollection","features":[)";
+	for (std::int32_t i = 0; i < count; ++i) {
+		if (i > 0) {
+			body += ",";
+		}
+		body += R"({"type":"Feature","properties":{},"geometry":null})";
+	}
+	body += R"(],"exceededTransferLimit":true})";
+	return body;
+}
+
+/// Answers every request with the same truncated page, forever.
+class AlwaysTruncatingTransport final : public HttpTransport {
+public:
+	mutable std::int32_t calls = 0;
+
+	[[nodiscard]] Result<HttpResponse> get(std::string_view /*path*/) const override {
+		++calls;
+		return HttpResponse{200, truncated_page(1), {}};
+	}
+};
 
 #if defined(__GNUC__)
 #pragma GCC diagnostic push
@@ -207,7 +235,7 @@ TEST(ArcGISClientRouting, RejectsUnsupportedProductsBeforeNetworkAccess) {
 TEST(ArcGISClientPaging, EncodesParametersAndFetchesEveryPage) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {
-		{200, R"({"features":[],"exceededTransferLimit":true})", {}},
+		{200, truncated_page(2000), {}},
 		{200, R"({"features":[],"exceededTransferLimit":false})", {}},
 	};
 	ArcGISClient client{transport};
@@ -229,6 +257,56 @@ TEST(ArcGISClientPaging, EncodesParametersAndFetchesEveryPage) {
 			  std::string::npos);
 	EXPECT_NE(transport->requests[0].find("resultOffset=0"), std::string::npos);
 	EXPECT_NE(transport->requests[1].find("resultOffset=2000"), std::string::npos);
+}
+
+TEST(ArcGISClientPaging, AdvancesTheOffsetByTheRecordsTheServerActuallyReturned) {
+	// ArcGIS clamps resultRecordCount to the layer's own maxRecordCount, so a
+	// truncated page can be shorter than the 2000 requested. Advancing by the
+	// request size would skip the records in between.
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {
+		{200, truncated_page(3), {}},
+		{200, truncated_page(2), {}},
+		{200, R"({"features":[],"exceededTransferLimit":false})", {}},
+	};
+	ArcGISClient client{transport};
+
+	const Result<std::vector<std::string>> result =
+		client.query_layer(ArcGISService::Outlooks, 1, {});
+
+	ASSERT_TRUE(result);
+	ASSERT_EQ(transport->requests.size(), 3u);
+	EXPECT_NE(transport->requests[0].find("resultOffset=0"), std::string::npos);
+	EXPECT_NE(transport->requests[1].find("resultOffset=3"), std::string::npos);
+	EXPECT_NE(transport->requests[2].find("resultOffset=5"), std::string::npos);
+}
+
+TEST(ArcGISClientPaging, FailsWhenATruncatedPageCarriesNoRecords) {
+	// Zero records plus exceededTransferLimit:true cannot converge — the
+	// offset would never move. Fail instead of looping.
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{200, R"({"features":[],"exceededTransferLimit":true})", {}}};
+	ArcGISClient client{transport};
+
+	const Result<std::vector<std::string>> result =
+		client.query_layer(ArcGISService::Outlooks, 1, {});
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::ServerError);
+	EXPECT_EQ(transport->requests.size(), 1u);
+}
+
+TEST(ArcGISClientPaging, StopsAndFailsWhenTheServerNeverStopsReportingTruncation) {
+	std::shared_ptr<AlwaysTruncatingTransport> transport =
+		std::make_shared<AlwaysTruncatingTransport>();
+	ArcGISClient client{transport};
+
+	const Result<std::vector<std::string>> result =
+		client.query_layer(ArcGISService::Outlooks, 1, {});
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::ServerError);
+	EXPECT_EQ(transport->calls, ArcGISPager{}.max_pages());
 }
 
 TEST(ArcGISClientPaging, ReturnsLogicalArcGISErrorsReportedWithHttp200) {
