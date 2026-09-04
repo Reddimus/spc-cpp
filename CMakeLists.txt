@@ -14,6 +14,8 @@ option(SPC_BUILD_TESTS "Build tests" ON)
 option(SPC_BUILD_EXAMPLES "Build examples" ON)
 option(SPC_ENABLE_LTO "Enable Link Time Optimization" ON)
 option(SPC_NATIVE_ARCH "Use -march=native for CPU-specific tuning" OFF)
+option(SPC_TUNE_X86_64_V3
+    "Build Release with -march=x86-64-v3 (AVX2/BMI2/FMA). Makes the artifact non-portable." OFF)
 option(SPC_ENABLE_CLANG_TIDY "Run clang-tidy while compiling project targets" OFF)
 option(SPC_WARNINGS_AS_ERRORS "Treat project warnings as errors" OFF)
 
@@ -62,14 +64,24 @@ if(NOT MSVC)
     if(SPC_NATIVE_ARCH)
         set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native")
         message(STATUS "Using -march=native for CPU-specific optimizations")
-    else()
+    elseif(SPC_TUNE_X86_64_V3)
+        # Opt-in only. check_cxx_compiler_flag proves the *compiler* accepts
+        # the flag, never that the *run* host has AVX2/BMI2/FMA -- and this is
+        # an installable SDK (install(EXPORT) + find_package(spc)), so the
+        # build host and the run host are routinely different. Defaulting this
+        # on made every stock Release build SIGILL on pre-Haswell / pre-Zen
+        # hardware and inside VMs that do not expose AVX2.
         include(CheckCXXCompilerFlag)
         check_cxx_compiler_flag("-march=x86-64-v3" COMPILER_SUPPORTS_X86_64_V3)
         if(COMPILER_SUPPORTS_X86_64_V3)
             set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=x86-64-v3")
+            message(STATUS "Release builds target x86-64-v3; the artifact is not portable")
         else()
+            message(WARNING "SPC_TUNE_X86_64_V3 requested but the compiler rejects the flag")
             set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mtune=generic")
         endif()
+    else()
+        set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -mtune=generic")
     endif()
 endif()
 

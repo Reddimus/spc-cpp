@@ -6,6 +6,8 @@
 make build
 make test
 make lint
+make fixtures-check   # fixture-provenance gate; CI fails on a stale SHA256SUMS
+make lint-md          # markdown-lint gate over **/*.md
 make test-consumers
 python3 tools/verify_arcgis_metadata.py  # live, opt-in
 ```
@@ -47,3 +49,7 @@ Glaze 8.3 parses loose SPC JSON. GoogleTest 1.18 runs the unit suite.
 
 The tag must match `project(spc-cpp VERSION ...)`. A `vX.Y.Z` tag triggers the
 release workflow, which reads the matching `CHANGELOG.md` section.
+
+The default `ClientConfig::user_agent` is generated from `PROJECT_VERSION`, so
+a bump carries automatically. `HttpClientLifecycle.DefaultUserAgentCarriesTheProjectVersion`
+fails if that ever stops being true.

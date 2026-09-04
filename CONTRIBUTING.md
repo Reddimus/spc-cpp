@@ -15,10 +15,14 @@ cd spc-cpp
 sudo apt install -y build-essential cmake clang-format \
     libcurl4-openssl-dev
 
-make build      # CMake configure + Release build
-make test       # Run unit tests (ctest)
-make lint       # clang-format --dry-run + cpp_auto_audit
+make build           # CMake configure + Release build
+make test            # Run unit tests (ctest)
+make lint            # clang-format --dry-run + cpp_auto_audit
+make fixtures-check  # fixture-provenance gate (stale SHA256SUMS fails CI)
+make lint-md         # markdown-lint gate over **/*.md
 ```
+
+`make help` lists every target.
 
 ## Code style
 
@@ -45,8 +49,9 @@ their own product-specific severity mappers.
 
 ## PRs
 
-- Branch, push, open a PR against `main`. CI (linux + macos +
-  markdown-lint) must be green.
+- Branch, push, open a PR against `main`. Every CI job must be green:
+  `build-linux`, `build-macos`, `markdown-lint`, `sanitizer`,
+  `thread-sanitizer`, `clang-tidy` and `consumer-smoke`.
 - Conventional-commit subject lines.
 - Update `CHANGELOG.md` under `[Unreleased]`.
 - A maintainer merges with a **merge commit** (history reachability

@@ -106,8 +106,34 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   explicitly: `parse_fire_weather(body, day, FireWeatherLayer::Outlook)`
   restores the old behaviour where that was in fact the right layer.
 
+- Release builds no longer default to `-march=x86-64-v3`. The probe only
+  proved the *compiler* accepted the flag, never that the run host has
+  AVX2/BMI2/FMA — and this is an installable SDK, so the build host and the run
+  host are routinely different. `-mtune=generic` is the default; set
+  `SPC_TUNE_X86_64_V3=ON` to opt in to the non-portable artifact.
+- The Esri-vs-GeoJSON parity gate now reads every captured fixture pair (three
+  categorical, four probabilistic). The test named for probabilistic parity
+  only ever opened the GeoJSON side, so `parse_esri_rings` was pinned by one
+  categorical layer.
+- `ci.yml` declares `permissions: contents: read` at the top level — it runs on
+  `pull_request` and executes third-party build scripts — and pins both actions
+  to full commit SHAs instead of mutable tags.
+- `CLAUDE.md` and `CONTRIBUTING.md` list the `fixtures-check` and `lint-md`
+  gates that CI enforces, `CONTRIBUTING.md` names all seven CI jobs, `make help`
+  lists every target, and the README documents `src/core/`, `query_layer`, and
+  the `JSON library: Glaze (divergence note)` heading the CHANGELOG points at.
+
+### Deprecated
+
+- `ArcGISClient::query_storm_reports()`. The SPC MapServer has no Local Storm
+  Report layer, so the method always failed without touching the network — it
+  now carries the attribute and doc comment its sibling
+  `query_active_watches()` already had. Use `ArchiveClient::storm_reports()`.
+
 ### Added
 
+- `ArcGISClient::query_fire_weather()` documents its all-or-nothing contract:
+  it merges two layers, and a failure on either discards both.
 - `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the
   ArcGIS code in `Error::http_status` only while that code is HTTP-shaped
   (100..599) and records it in `Error::detail`, so a code such as 1000 can no

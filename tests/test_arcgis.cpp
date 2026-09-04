@@ -19,12 +19,16 @@
 #include "spc/models/storm_report.hpp"
 #include "spc/models/watch.hpp"
 
+#include <cstddef>
 #include <cstdint>
+#include <format>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
 #include <string>
+#include <utility>
+#include <vector>
 
 namespace {
 
@@ -181,14 +185,134 @@ TEST(ArcGISParity, EsriRingsMatchGeoJsonForDay1Categorical) {
 		   "genuinely diverged from the verbatim GeoJSON path (not source quantization)";
 }
 
-TEST(ArcGISParity, EsriProbTornadoMatchesGeoJsonProb) {
-	const ProbOutlookPayload gj =
-		parse_probabilistic(slurp("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
-	ASSERT_GT(gj.features.size(), 0u);
-	for (const ProbOutlookFeature& f : gj.features) {
-		EXPECT_GT(f.probability, 0.0);
-		EXPECT_LT(f.probability, 1.0);
-		EXPECT_FALSE(f.rings.empty());
+// Grid-probe membership agreement between two ring sets, on the same terms as
+// the day-1 categorical gate above: probes within ~5 m of either boundary are
+// skipped, everything else must classify identically.
+struct MembershipProbe {
+	std::size_t compared = 0;
+	std::size_t agreed = 0;
+};
+
+void probe_membership(const std::vector<Polygon>& reference, const std::vector<Polygon>& candidate,
+					  MembershipProbe& probe) {
+	constexpr double kSkip = 5.0e-5;
+	constexpr int kN = 40;
+
+	double minx = 1e18;
+	double miny = 1e18;
+	double maxx = -1e18;
+	double maxy = -1e18;
+	for (const Polygon& r : reference) {
+		for (const LonLat& p : r) {
+			minx = std::min(minx, p.lon);
+			maxx = std::max(maxx, p.lon);
+			miny = std::min(miny, p.lat);
+			maxy = std::max(maxy, p.lat);
+		}
+	}
+	const double pad = 0.5;
+	minx -= pad;
+	maxx += pad;
+	miny -= pad;
+	maxy += pad;
+
+	for (int ix = 0; ix <= kN; ++ix) {
+		for (int iy = 0; iy <= kN; ++iy) {
+			const double px = minx + (maxx - minx) * (static_cast<double>(ix) / kN);
+			const double py = miny + (maxy - miny) * (static_cast<double>(iy) / kN);
+			if (dist_to_boundary(px, py, reference) < kSkip ||
+				dist_to_boundary(px, py, candidate) < kSkip) {
+				continue;
+			}
+			++probe.compared;
+			if (inside_any(px, py, reference) == inside_any(px, py, candidate)) {
+				++probe.agreed;
+			}
+		}
+	}
+}
+
+// Every captured Esri/GeoJSON fixture pair, not just the day-1 categorical
+// one. The probabilistic pairs previously had no reader at all: the test named
+// for Esri-vs-GeoJSON probabilistic parity only ever opened the GeoJSON side,
+// so parse_esri_rings' hole-dropping rule was pinned by one categorical layer.
+TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
+	struct Pair {
+		std::string stem;
+		std::int32_t day;
+		std::string hazard; ///< empty for the categorical layers
+	};
+	const std::vector<Pair> pairs = {
+		{"arcgis_day1_categorical", 1, ""},	   {"arcgis_day2_categorical", 2, ""},
+		{"arcgis_day3_categorical", 3, ""},	   {"arcgis_day1_prob_tornado", 1, "tornado"},
+		{"arcgis_day1_prob_hail", 1, "hail"},  {"arcgis_day1_prob_wind", 1, "wind"},
+		{"arcgis_day2_prob_wind", 2, "wind"},
+	};
+
+	for (const Pair& pair : pairs) {
+		// Label -> rings, from the verbatim GeoJSON walker.
+		std::vector<std::pair<std::string, std::vector<Polygon>>> reference;
+		if (pair.hazard.empty()) {
+			const CategoricalOutlookPayload gj =
+				parse_categorical(slurp(pair.stem + ".geojson"), pair.day);
+			for (const OutlookFeature& f : gj.features) {
+				reference.emplace_back(f.label, f.rings);
+			}
+		} else {
+			const ProbOutlookPayload gj =
+				parse_probabilistic(slurp(pair.stem + ".geojson"), pair.day, pair.hazard);
+			for (const ProbOutlookFeature& f : gj.features) {
+				EXPECT_GT(f.probability, 0.0) << pair.stem;
+				EXPECT_LT(f.probability, 1.0) << pair.stem;
+				// ProbOutlookFeature keeps no label; the isopleth value is the
+				// band identity, and both sides derive it from the same string.
+				reference.emplace_back(std::format("{:.6f}", f.probability), f.rings);
+			}
+		}
+		ASSERT_GT(reference.size(), 0u) << pair.stem;
+
+		const glz::expected<Json, std::string> root =
+			detail::parse_root(slurp(pair.stem + ".esri.json"));
+		ASSERT_TRUE(root.has_value()) << pair.stem;
+		const Json* feats = detail::lookup(*root, "features");
+		ASSERT_NE(feats, nullptr) << pair.stem;
+		ASSERT_TRUE(feats->is_array()) << pair.stem;
+
+		MembershipProbe probe;
+		std::size_t matched = 0;
+		for (const glz::generic& feat : feats->get_array()) {
+			const Json* attrs = detail::lookup(feat, "attributes");
+			const Json* geom = detail::lookup(feat, "geometry");
+			if (attrs == nullptr || geom == nullptr) {
+				continue;
+			}
+			const std::string label =
+				pair.hazard.empty()
+					? detail::json_string(*attrs, "label")
+					: std::format("{:.6f}", detail::normalized_probability(*attrs));
+			const std::vector<Polygon>* expected = nullptr;
+			for (const std::pair<std::string, std::vector<Polygon>>& band : reference) {
+				if (band.first == label) {
+					expected = &band.second;
+					break;
+				}
+			}
+			if (expected == nullptr) {
+				continue;
+			}
+			const std::vector<Polygon> esri_rings = detail::parse_esri_rings(*geom);
+			ASSERT_FALSE(esri_rings.empty()) << pair.stem << " band " << label;
+			++matched;
+			probe_membership(*expected, esri_rings, probe);
+		}
+
+		EXPECT_EQ(matched, reference.size())
+			<< pair.stem << ": Esri and GeoJSON disagree on the band set";
+		EXPECT_GT(probe.compared, 100u) << pair.stem << ": too few clear-of-boundary probes";
+		EXPECT_EQ(probe.agreed, probe.compared)
+			<< pair.stem << ": Esri vs GeoJSON disagreed on "
+			<< (probe.compared - probe.agreed) << "/" << probe.compared
+			<< " unambiguous interior/exterior probes";
 	}
 }
 

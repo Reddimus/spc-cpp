@@ -215,6 +215,27 @@ TEST(ArcGISClientRouting, CoversEveryPublishedFireWeatherFeatureLayer) {
 	}
 }
 
+TEST(ArcGISClientRouting, FireWeatherIsAllOrNothingAcrossItsTwoMergedLayers) {
+	// query_fire_weather merges two layers per day. If the second fails, the
+	// features already parsed from the first are discarded and the caller gets
+	// an error with no indication that half the product was retrieved.
+	// FireWeatherPayload cannot represent the partial state, so the contract
+	// is all-or-nothing; this pins it.
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	const std::string body = R"({"features":[
+		{"attributes":{"dn":5},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}}
+	],"exceededTransferLimit":false})";
+	// A 400 is not retryable, so the second layer fails on its first request.
+	transport->responses = {{200, body, {}}, {400, "bad request", {}}};
+	ArcGISClient client{transport};
+
+	const Result<FireWeatherPayload> result = client.query_fire_weather(1);
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
+	EXPECT_EQ(transport->requests.size(), 2u);
+}
+
 TEST(ArcGISClientRouting, RejectsUnsupportedProductsBeforeNetworkAccess) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	ArcGISClient client{transport};

@@ -93,6 +93,11 @@ public:
 	[[nodiscard]] Result<ConditionalIntensityPayload>
 	query_conditional_intensity(std::int32_t day, const std::string& hazard);
 	[[nodiscard]] Result<Day48OutlookPayload> query_day4_8(std::int32_t day);
+	/// Merges both published fire-weather layers for `day`. All-or-nothing: if
+	/// either layer fails, nothing is returned, including the features already
+	/// parsed from the other. `FireWeatherPayload` cannot represent a partial
+	/// result, so a caller that needs one layer independently should use
+	/// `query_layer(ArcGISService::FireWeather, ...)`.
 	[[nodiscard]] Result<FireWeatherPayload> query_fire_weather(std::int32_t day);
 	/// NOAA's WWA polygons do not contain the SPC watch parameters represented
 	/// by WatchPayload. Use ArchiveClient::watches() for active SPC watches.
@@ -100,7 +105,11 @@ public:
 		"use ArchiveClient::watches() for SPC watch data")]] [[nodiscard]] Result<WatchPayload>
 	query_active_watches();
 	[[nodiscard]] Result<MesoscalePayload> query_active_md();
-	[[nodiscard]] Result<StormReportPayload> query_storm_reports();
+	/// The SPC MapServer publishes no Local Storm Report layer, so this always
+	/// fails without touching the network. Use `ArchiveClient::storm_reports()`.
+	[[deprecated("use ArchiveClient::storm_reports(); the SPC MapServer has no LSR "
+				 "layer")]] [[nodiscard]] Result<StormReportPayload>
+	query_storm_reports();
 
 	/// Raw paged query against one of the documented NOAA MapServers.
 	[[nodiscard]] Result<std::vector<std::string>>
