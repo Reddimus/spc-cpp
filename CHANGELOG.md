@@ -30,6 +30,29 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   2000 requested; the offset then skipped the gap and the caller got a
   successful result with a silent hole. `ArcGISPager::advance()` now takes the
   returned record count.
+- **`RateLimiter` crashed on a zero `refill_interval` (SIGFPE).**
+  `RateLimiter::Config` is a public aggregate with no validation, so
+  `RateLimiter{{.refill_interval = 0ms}}` reached an integer division by zero
+  in `refill()` on the first `try_acquire()`. The constructor now clamps a
+  non-positive interval to the 1000 ms default, and clamps `initial_tokens` to
+  `max_tokens`.
+- **`RateLimiter::acquire()` hung forever once a `daily_limit` was spent.**
+  With no `Config::max_wait` it polls `try_acquire()` every 10 ms, and
+  `try_acquire()` returns false permanently until the next UTC-midnight reset,
+  so the caller's thread spun until then. It now returns false immediately
+  when the daily quota is exhausted, since waiting cannot help.
+- `ArchiveClient` interpolated `ts`, `sts`, `ets` and `wfo` into IEM query URLs
+  with no percent-encoding, while the ArcGIS path in the same file encoded
+  every value. `api.hpp` documents the timestamps as ISO 8601, which permits a
+  `+HH:MM` offset, and a raw `+` decodes server-side as a space — so an
+  offset-bearing timestamp silently queried a different window. An `&` in any
+  of the four injected extra query parameters. All four are now encoded.
+- `ArchiveClient` now bounds its rate-limit wait (5 s) instead of blocking the
+  caller's thread indefinitely, which also makes the documented
+  `ErrorCode::RateLimited` result reachable, and acquires a token per retry
+  attempt rather than per call — `with_retry` re-issues up to 4 requests, and
+  retries precisely on 429/503, so one token was buying up to four requests
+  exactly when IEM was asking for less traffic.
 - ArcGIS paging is bounded. A page that reports truncation while carrying no
   records, and a server that never stops reporting truncation, now fail with
   `ErrorCode::ServerError` after at most `ArcGISPager::max_pages()` (100)

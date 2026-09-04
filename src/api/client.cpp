@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <format>
 #include <memory>
 #include <string>
@@ -124,6 +125,15 @@ std::string percent_encode(std::string_view value) {
 		}
 	}
 	return encoded;
+}
+
+/// IEM is a courtesy third party, so the bucket stays small — but the wait
+/// must be bounded, or `RateLimiter::acquire()` blocks the caller's thread
+/// forever and the documented `ErrorCode::RateLimited` result is unreachable.
+RateLimiter::Config archive_rate_limit() {
+	RateLimiter::Config config;
+	config.max_wait = std::chrono::seconds{5};
+	return config;
 }
 
 const char* service_base(ArcGISService service) {
@@ -560,7 +570,7 @@ struct ArchiveClient::Impl {
 			  r.initial_delay = std::chrono::milliseconds{500};
 			  return r;
 		  }()),
-		  limiter(RateLimiter::Config{}) {}
+		  limiter(archive_rate_limit()) {}
 
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
 		: http(usable_transport(std::move(transport))), retry([] {
@@ -569,7 +579,22 @@ struct ArchiveClient::Impl {
 			  policy.initial_delay = std::chrono::milliseconds{500};
 			  return policy;
 		  }()),
-		  limiter(RateLimiter::Config{}) {}
+		  limiter(archive_rate_limit()) {}
+
+	/// Pay a token per *attempt*, not per call: `with_retry` re-issues the
+	/// request up to `max_attempts` times, and it retries precisely on
+	/// 429/503 — the responses in which IEM is asking for less traffic.
+	/// Acquiring once outside the retry loop undercounted the budget by 4x.
+	Result<HttpResponse> rate_limited_get(const std::string& url) {
+		return with_retry(
+			[&]() -> Result<HttpResponse> {
+				if (!limiter.acquire()) {
+					return std::unexpected(Error::rate_limited("IEM rate limit"));
+				}
+				return http->get(url);
+			},
+			retry);
+	}
 };
 
 ArchiveClient::ArchiveClient(ClientConfig config)
@@ -581,16 +606,14 @@ ArchiveClient::ArchiveClient(ArchiveClient&&) noexcept = default;
 ArchiveClient& ArchiveClient::operator=(ArchiveClient&&) noexcept = default;
 
 Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
-	if (!impl_->limiter.acquire()) {
-		return std::unexpected(Error::rate_limited("IEM rate limit"));
-	}
+	// `ts` is caller-supplied and reaches a query string, so it is encoded
+	// like every ArcGIS query value: an unencoded '&' would inject a
+	// parameter and an unencoded '+' would decode server-side as a space.
 	std::string url = std::format("{}json/spcwatch.py", kIemBase);
 	if (!ts.empty()) {
-		url += std::format("?ts={}", ts);
+		url += "?ts=" + percent_encode(ts);
 	}
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
-					  Feed404::NotFound);
+	Result<std::string> body = body_or_error(impl_->rate_limited_get(url), Feed404::NotFound);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -605,17 +628,14 @@ Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
 Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start_iso,
 														const std::string& end_iso,
 														const std::string& wfo) {
-	if (!impl_->limiter.acquire()) {
-		return std::unexpected(Error::rate_limited("IEM rate limit"));
-	}
-	std::string url =
-		std::format("{}geojson/lsr.geojson?sts={}&ets={}", kIemBase, start_iso, end_iso);
+	// api.hpp documents these as ISO 8601, which permits a "+HH:MM" offset; a
+	// raw '+' decodes server-side as a space and silently shifts the window.
+	std::string url = std::format("{}geojson/lsr.geojson?sts={}&ets={}", kIemBase,
+								  percent_encode(start_iso), percent_encode(end_iso));
 	if (!wfo.empty()) {
-		url += std::format("&wfo={}", wfo);
+		url += "&wfo=" + percent_encode(wfo);
 	}
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
-					  Feed404::NotFound);
+	Result<std::string> body = body_or_error(impl_->rate_limited_get(url), Feed404::NotFound);
 	if (!body) {
 		return std::unexpected(body.error());
 	}

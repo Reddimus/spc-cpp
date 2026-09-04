@@ -418,6 +418,40 @@ TEST(ArcGISClientRouting, ActiveWatchesDirectCallersToTheIemClient) {
 	EXPECT_TRUE(transport->requests.empty());
 }
 
+// ===== ArchiveClient (IEM) query construction =====
+//
+// api.hpp documents start_iso/end_iso as ISO 8601, which permits a "+HH:MM"
+// UTC offset. A raw '+' in a query string decodes server-side as a space, so
+// an unencoded offset silently queries a different window; a raw '&' in any
+// value injects extra parameters.
+
+TEST(ArchiveClientRouting, PercentEncodesTheWatchTimestamp) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{200, R"({"features":[]})", {}}};
+	ArchiveClient client{transport};
+
+	ASSERT_TRUE(client.watches("202605191200&x=1"));
+
+	ASSERT_EQ(transport->requests.size(), 1u);
+	EXPECT_EQ(transport->requests[0],
+			  "https://mesonet.agron.iastate.edu/json/spcwatch.py?ts=202605191200%26x%3D1");
+}
+
+TEST(ArchiveClientRouting, PercentEncodesIsoOffsetsAndTheWfoFilter) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{200, R"({"features":[]})", {}}};
+	ArchiveClient client{transport};
+
+	ASSERT_TRUE(client.storm_reports("2026-05-19T12:00:00+00:00", "2026-05-20T12:00:00+00:00",
+									 "ICT&sts=1900-01-01"));
+
+	ASSERT_EQ(transport->requests.size(), 1u);
+	EXPECT_EQ(transport->requests[0],
+			  "https://mesonet.agron.iastate.edu/geojson/lsr.geojson"
+			  "?sts=2026-05-19T12%3A00%3A00%2B00%3A00&ets=2026-05-20T12%3A00%3A00%2B00%3A00"
+			  "&wfo=ICT%26sts%3D1900-01-01");
+}
+
 TEST(HttpClientLifecycle, ConcurrentClientsShareProcessWideCurlState) {
 	std::vector<std::thread> workers;
 	workers.reserve(16);
