@@ -402,7 +402,9 @@ TEST(Feed404Semantics, ArcGisLogicalNotFoundIsAGenuineNotFound) {
 TEST(Feed404Semantics, ArcGisCodeThatIsNotAnHttpStatusStaysOutOfHttpStatus) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {
-		{200, R"({"error":{"code":1000,"message":"Unable to complete operation.","details":[]}})", {}},
+		{200,
+		 R"({"error":{"code":1000,"message":"Unable to complete operation.","details":[]}})",
+		 {}},
 	};
 	ArcGISClient client{transport};
 

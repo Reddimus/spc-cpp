@@ -21,8 +21,8 @@
 
 #include <cstddef>
 #include <cstdint>
-#include <format>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <gtest/gtest.h>
 #include <sstream>
@@ -243,9 +243,9 @@ TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
 		std::string hazard; ///< empty for the categorical layers
 	};
 	const std::vector<Pair> pairs = {
-		{"arcgis_day1_categorical", 1, ""},	   {"arcgis_day2_categorical", 2, ""},
-		{"arcgis_day3_categorical", 3, ""},	   {"arcgis_day1_prob_tornado", 1, "tornado"},
-		{"arcgis_day1_prob_hail", 1, "hail"},  {"arcgis_day1_prob_wind", 1, "wind"},
+		{"arcgis_day1_categorical", 1, ""},	  {"arcgis_day2_categorical", 2, ""},
+		{"arcgis_day3_categorical", 3, ""},	  {"arcgis_day1_prob_tornado", 1, "tornado"},
+		{"arcgis_day1_prob_hail", 1, "hail"}, {"arcgis_day1_prob_wind", 1, "wind"},
 		{"arcgis_day2_prob_wind", 2, "wind"},
 	};
 
@@ -287,9 +287,8 @@ TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
 				continue;
 			}
 			const std::string label =
-				pair.hazard.empty()
-					? detail::json_string(*attrs, "label")
-					: std::format("{:.6f}", detail::normalized_probability(*attrs));
+				pair.hazard.empty() ? detail::json_string(*attrs, "label")
+									: std::format("{:.6f}", detail::normalized_probability(*attrs));
 			const std::vector<Polygon>* expected = nullptr;
 			for (const std::pair<std::string, std::vector<Polygon>>& band : reference) {
 				if (band.first == label) {
@@ -310,9 +309,8 @@ TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
 			<< pair.stem << ": Esri and GeoJSON disagree on the band set";
 		EXPECT_GT(probe.compared, 100u) << pair.stem << ": too few clear-of-boundary probes";
 		EXPECT_EQ(probe.agreed, probe.compared)
-			<< pair.stem << ": Esri vs GeoJSON disagreed on "
-			<< (probe.compared - probe.agreed) << "/" << probe.compared
-			<< " unambiguous interior/exterior probes";
+			<< pair.stem << ": Esri vs GeoJSON disagreed on " << (probe.compared - probe.agreed)
+			<< "/" << probe.compared << " unambiguous interior/exterior probes";
 	}
 }
 
@@ -355,8 +353,8 @@ TEST(NetNewModels, FireWeatherOwnSeverityMapper) {
 	EXPECT_EQ(fire_severity_from_label("CRIT"), 2);
 	EXPECT_EQ(fire_severity_from_label("EXTM"), 3);
 	EXPECT_EQ(fire_severity_from_label("SLGT"), 0); // not categorical
-	const FireWeatherPayload p =
-		parse_fire_weather(slurp("arcgis_day1_fire_weather.esri.json"), 1, FireWeatherLayer::Outlook);
+	const FireWeatherPayload p = parse_fire_weather(slurp("arcgis_day1_fire_weather.esri.json"), 1,
+													FireWeatherLayer::Outlook);
 	EXPECT_EQ(p.day, 1);
 	ASSERT_EQ(p.features.size(), 3u);
 	EXPECT_EQ(p.features[0].label, "ELEV");
@@ -375,9 +373,8 @@ TEST(NetNewModels, FireWeatherLayerIsTheOnlyThingThatDisambiguatesDayOneAndTwoDn
 	// numeric dn band index (5/8/10) that the Outlook and DryThunderstorm
 	// layers both use with different meanings. Nothing in the body says which
 	// layer it came from, so the caller must say — there is no safe default.
-	for (const std::string& name :
-		 {std::string{"arcgis_day1_fire_weather.esri.json"},
-		  std::string{"arcgis_day2_fire_weather.esri.json"}}) {
+	for (const std::string& name : {std::string{"arcgis_day1_fire_weather.esri.json"},
+									std::string{"arcgis_day2_fire_weather.esri.json"}}) {
 		const std::string body = slurp(name);
 		EXPECT_EQ(body.find("LABEL"), std::string::npos) << name;
 		EXPECT_EQ(body.find("\"label\""), std::string::npos) << name;

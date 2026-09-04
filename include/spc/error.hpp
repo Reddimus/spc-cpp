@@ -123,7 +123,7 @@ struct Error {
 	/// `Feed404::NoActiveOutlook` (SPC static products only) yields
 	/// `FeedUnavailable`; the default `Feed404::NotFound` yields `NotFound`.
 	[[nodiscard]] static Error from_response(int status, const std::string& body,
-											  Feed404 semantics = Feed404::NotFound);
+											 Feed404 semantics = Feed404::NotFound);
 
 	/// Create an Error from an ArcGIS logical failure envelope
 	/// (`{"error":{"code":...,"message":...}}`), which the MapServer reports

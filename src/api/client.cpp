@@ -233,9 +233,8 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
 	}
 	const std::string url = std::format("{}day{}otlk_cat.nolyr.geojson", kStaticBase, day);
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
-					  Feed404::NoActiveOutlook);
+	Result<std::string> body = body_or_error(
+		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -262,9 +261,8 @@ Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 	const std::string filename = day == 3 ? "day3otlk_prob.nolyr.geojson"
 										  : std::format("day{}otlk_{}.nolyr.geojson", day, tag);
 	const std::string url = std::string{kStaticBase} + filename;
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
-					  Feed404::NoActiveOutlook);
+	Result<std::string> body = body_or_error(
+		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -281,9 +279,8 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
 			Error::invalid_request("extended outlook day must be between 4 and 8"));
 	}
 	const std::string url = std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day);
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry),
-					  Feed404::NoActiveOutlook);
+	Result<std::string> body = body_or_error(
+		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -336,15 +333,15 @@ struct ArcGISClient::Impl {
 			}
 			if (envelope->exceeded_transfer_limit && envelope->feature_count == 0) {
 				// The offset would never move: paging cannot converge.
-				return std::unexpected(Error::server(
-					"ArcGIS reported a truncated page containing no records"));
+				return std::unexpected(
+					Error::server("ArcGIS reported a truncated page containing no records"));
 			}
 			pages.push_back(std::move(*body));
 			pager.advance(envelope->feature_count, envelope->exceeded_transfer_limit);
 		}
 		if (pager.page_limit_reached()) {
-			return std::unexpected(Error::server(std::format(
-				"ArcGIS paging did not converge within {} pages", pager.max_pages())));
+			return std::unexpected(Error::server(
+				std::format("ArcGIS paging did not converge within {} pages", pager.max_pages())));
 		}
 		return pages;
 	}

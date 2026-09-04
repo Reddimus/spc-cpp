@@ -143,8 +143,8 @@ Result<HttpResponse> HttpClient::get(std::string_view path) const {
 	CURLcode rc = curl_easy_perform(curl);
 	if (rc != CURLE_OK) {
 		if (sink.overflowed) {
-			return std::unexpected(Error::network(
-				"response exceeded ClientConfig::max_response_bytes"));
+			return std::unexpected(
+				Error::network("response exceeded ClientConfig::max_response_bytes"));
 		}
 		return std::unexpected(Error::network(curl_easy_strerror(rc)));
 	}
