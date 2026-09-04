@@ -1,6 +1,6 @@
 # spc-cpp
 
-[![CI](https://github.com/Reddimus/spc-cpp/actions/workflows/ci.yml/badge.svg)](https://github.com/Reddimus/spc-cpp/actions/workflows/ci.yml)
+[![CI](https://github.com/Reddimus/spc-cpp/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/Reddimus/spc-cpp/actions/workflows/ci.yml)
 [![Release](https://img.shields.io/github/v/release/Reddimus/spc-cpp)](https://github.com/Reddimus/spc-cpp/releases)
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
