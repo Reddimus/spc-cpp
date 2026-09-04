@@ -27,6 +27,7 @@ public:
 	/// hard server max is typically 2000; that is the default. `max_pages`
 	/// bounds a server (or caching proxy) that keeps reporting truncation
 	/// without advancing — see `page_limit_reached()`.
+	// NOLINTNEXTLINE(bugprone-easily-swappable-parameters)
 	explicit ArcGISPager(std::int32_t page_size = 2000, std::int32_t max_pages = 100)
 		: page_size_(page_size > 0 ? page_size : 2000),
 		  max_pages_(max_pages > 0 ? max_pages : 100) {}
