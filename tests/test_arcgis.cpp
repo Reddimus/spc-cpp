@@ -19,6 +19,7 @@
 #include "spc/models/storm_report.hpp"
 #include "spc/models/watch.hpp"
 
+#include <cstdint>
 #include <filesystem>
 #include <fstream>
 #include <gtest/gtest.h>
@@ -230,7 +231,8 @@ TEST(NetNewModels, FireWeatherOwnSeverityMapper) {
 	EXPECT_EQ(fire_severity_from_label("CRIT"), 2);
 	EXPECT_EQ(fire_severity_from_label("EXTM"), 3);
 	EXPECT_EQ(fire_severity_from_label("SLGT"), 0); // not categorical
-	const FireWeatherPayload p = parse_fire_weather(slurp("arcgis_day1_fire_weather.esri.json"), 1);
+	const FireWeatherPayload p =
+		parse_fire_weather(slurp("arcgis_day1_fire_weather.esri.json"), 1, FireWeatherLayer::Outlook);
 	EXPECT_EQ(p.day, 1);
 	ASSERT_EQ(p.features.size(), 3u);
 	EXPECT_EQ(p.features[0].label, "ELEV");
@@ -241,6 +243,40 @@ TEST(NetNewModels, FireWeatherOwnSeverityMapper) {
 	EXPECT_EQ(p.features[2].severity, 3);
 	for (const FireWeatherFeature& f : p.features) {
 		EXPECT_FALSE(f.rings.empty());
+	}
+}
+
+TEST(NetNewModels, FireWeatherLayerIsTheOnlyThingThatDisambiguatesDayOneAndTwoDn) {
+	// The captured day-1 and day-2 payloads carry no LABEL at all, only the
+	// numeric dn band index (5/8/10) that the Outlook and DryThunderstorm
+	// layers both use with different meanings. Nothing in the body says which
+	// layer it came from, so the caller must say — there is no safe default.
+	for (const std::string& name :
+		 {std::string{"arcgis_day1_fire_weather.esri.json"},
+		  std::string{"arcgis_day2_fire_weather.esri.json"}}) {
+		const std::string body = slurp(name);
+		EXPECT_EQ(body.find("LABEL"), std::string::npos) << name;
+		EXPECT_EQ(body.find("\"label\""), std::string::npos) << name;
+
+		const std::int32_t day = name.find("day1") != std::string::npos ? 1 : 2;
+		const FireWeatherPayload outlook = parse_fire_weather(body, day, FireWeatherLayer::Outlook);
+		const FireWeatherPayload dry =
+			parse_fire_weather(body, day, FireWeatherLayer::DryThunderstorm);
+
+		ASSERT_EQ(outlook.features.size(), 3u) << name;
+		ASSERT_EQ(dry.features.size(), 3u) << name;
+		EXPECT_EQ(outlook.features[0].label, "ELEV") << name;
+		EXPECT_EQ(outlook.features[1].label, "CRIT") << name;
+		EXPECT_EQ(outlook.features[2].label, "EXTM") << name;
+		EXPECT_EQ(dry.features[0].label, "IDRT") << name;
+		EXPECT_EQ(dry.features[1].label, "SDRT") << name;
+		for (const FireWeatherFeature& f : dry.features) {
+			EXPECT_EQ(f.layer, FireWeatherLayer::DryThunderstorm) << name;
+			EXPECT_EQ(f.severity, 0) << name;
+			EXPECT_NE(f.label, "ELEV") << name;
+			EXPECT_NE(f.label, "CRIT") << name;
+			EXPECT_NE(f.label, "EXTM") << name;
+		}
 	}
 }
 

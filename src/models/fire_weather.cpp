@@ -112,10 +112,6 @@ std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
 	return 0; // dry-thunderstorm bands (IDRT/SDRT) and unknowns: label-only
 }
 
-FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day) {
-	return parse_fire_weather(body, day, FireWeatherLayer::Outlook);
-}
-
 FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
 									  FireWeatherLayer layer) {
 	const Json root = parse_root_or_throw(body);

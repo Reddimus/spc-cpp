@@ -44,13 +44,14 @@ struct FireWeatherPayload {
 /// (IDRT/SDRT) and anything else map to 0 (kept by label, no severity).
 [[nodiscard]] std::uint8_t fire_severity_from_label(std::string_view label) noexcept;
 
-/// Parse a fire-weather outlook (ArcGIS Esri or static GeoJSON). Throws
+/// Parse one known ArcGIS fire-weather layer (Esri or GeoJSON body). Throws
 /// std::runtime_error on malformed JSON.
-[[nodiscard]] FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day);
-
-/// Parse one known ArcGIS fire-weather layer. Day 1 and 2 use the layer kind
-/// to disambiguate numeric `dn` codes shared by categorical and dry-thunder
-/// products. Day 3 through 8 decode LABEL/label/dn as probabilities.
+///
+/// `layer` is required and is not inferable from the body: NOAA's day-1 and
+/// day-2 payloads carry no LABEL at all, only a numeric `dn` band index that
+/// the outlook (5=ELEV, 8=CRIT, 10=EXTM) and dry-thunderstorm (5=IDRT,
+/// 8=SDRT) products both use with different meanings. Day 3 through 8 decode
+/// LABEL/label/dn as probabilities.
 [[nodiscard]] FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
 													FireWeatherLayer layer);
 

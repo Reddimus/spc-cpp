@@ -37,6 +37,17 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ArcGISPager::offset()` is a `std::int64_t`, so the arithmetic cannot
   overflow.
 
+### Removed
+
+- The two-argument `parse_fire_weather(body, day)` overload. It silently
+  assumed `FireWeatherLayer::Outlook`, so a dry-thunderstorm body decoded
+  `dn=5` as `"ELEV"` (severity 1) instead of `"IDRT"` (severity 0) — the label
+  confusion 0.2.0 fixed, still reachable through the public API. The captured
+  day-1 and day-2 payloads carry no LABEL at all, only the shared numeric
+  `dn`, so nothing in a body says which layer produced it. Pass the layer
+  explicitly: `parse_fire_weather(body, day, FireWeatherLayer::Outlook)`
+  restores the old behaviour where that was in fact the right layer.
+
 ### Added
 
 - `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the
