@@ -15,6 +15,7 @@
 
 #include "spc/types.hpp"
 
+#include <cstddef>
 #include <glaze/glaze.hpp>
 #include <glaze/json/generic.hpp>
 #include <string>
@@ -33,6 +34,19 @@ const Json* lookup(const Json& obj, const char* key);
 
 /// String value of `obj[key]`, or "" if absent / null / non-string.
 std::string json_string(const Json& obj, const char* key);
+
+/// Parse the leading decimal number of `text` **locale-independently**, and
+/// report how many characters it consumed. Returns false when nothing parses.
+///
+/// `std::stod` delegates to `strtod`, which honours the process `LC_NUMERIC`:
+/// on a comma-decimal host (any app that calls `setlocale(LC_ALL, "")` on a
+/// de_DE / fr_FR / pt_BR desktop) `strtod("0.15")` stops at the '.' and
+/// returns 0. SPC publishes probabilities as numeric strings, so that turned
+/// a live outlook into a successful, silently empty payload.
+///
+/// Narrower than `std::stod` by design: leading whitespace and a leading '+'
+/// are rejected. No SPC payload uses either form.
+bool parse_double(std::string_view text, double& value, std::size_t& consumed);
 
 /// SPC ships `LABEL` as either a string ("SLGT", "5") or a number (5).
 /// Always returns a numeric view; non-numeric / missing yields 0.

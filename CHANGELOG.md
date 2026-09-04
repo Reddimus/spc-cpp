@@ -30,6 +30,23 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   2000 requested; the offset then skipped the gap and the caller got a
   successful result with a silent hole. `ArcGISPager::advance()` now takes the
   returned record count.
+- **Numeric-as-string probabilities were locale-dependent.** `std::stod`
+  delegates to `strtod`, which honours the process `LC_NUMERIC`. On a
+  comma-decimal host — any application that calls `setlocale(LC_ALL, "")` on a
+  de_DE / fr_FR / pt_BR desktop, as Qt and GTK apps do — `strtod("0.15")`
+  consumed only `"0"` and returned 0 without throwing. The live Day 4-8 static
+  feed carries its probability only as the string `"LABEL": "0.15"`, so the
+  feature was dropped by the `probability > 0.0` gate and
+  `StaticFeedClient::day4_8()` returned a successful, silently empty payload.
+  The same parse gated fire weather's no-risk sentinel filter, so a
+  `"Probability Too Low"` polygon shipped as a real band. Both now go through
+  a locale-independent `spc::detail::parse_double`, which uses
+  `std::from_chars` where the standard library provides it for `double` and a
+  classic-locale stream elsewhere (libc++ only implements floating-point
+  `from_chars` from version 20; the project's clang-tidy job builds against
+  libc++ 18). Output is unchanged in the C locale for every value in the
+  fixture corpus; the parse is narrower than `std::stod` only in rejecting
+  leading whitespace and a leading `+`, neither of which any SPC payload uses.
 - **`RateLimiter` crashed on a zero `refill_interval` (SIGFPE).**
   `RateLimiter::Config` is a public aggregate with no validation, so
   `RateLimiter{{.refill_interval = 0ms}}` reached an integer division by zero
