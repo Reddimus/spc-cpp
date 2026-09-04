@@ -35,8 +35,15 @@ const Json* lookup(const Json& obj, const char* key);
 /// String value of `obj[key]`, or "" if absent / null / non-string.
 std::string json_string(const Json& obj, const char* key);
 
+/// Outcome of `parse_double`.
+struct ParsedNumber {
+	double value = 0.0;		  ///< meaningful only when `ok`
+	std::size_t consumed = 0; ///< characters the number occupied
+	bool ok = false;
+};
+
 /// Parse the leading decimal number of `text` **locale-independently**, and
-/// report how many characters it consumed. Returns false when nothing parses.
+/// report how many characters it consumed.
 ///
 /// `std::stod` delegates to `strtod`, which honours the process `LC_NUMERIC`:
 /// on a comma-decimal host (any app that calls `setlocale(LC_ALL, "")` on a
@@ -46,7 +53,7 @@ std::string json_string(const Json& obj, const char* key);
 ///
 /// Narrower than `std::stod` by design: leading whitespace and a leading '+'
 /// are rejected. No SPC payload uses either form.
-bool parse_double(std::string_view text, double& value, std::size_t& consumed);
+ParsedNumber parse_double(std::string_view text);
 
 /// SPC ships `LABEL` as either a string ("SLGT", "5") or a number (5).
 /// Always returns a numeric view; non-numeric / missing yields 0.

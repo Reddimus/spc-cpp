@@ -63,9 +63,10 @@ std::string json_string(const Json& obj, const char* key) {
 	return {};
 }
 
-bool parse_double(std::string_view text, double& value, std::size_t& consumed) {
+ParsedNumber parse_double(std::string_view text) {
+	ParsedNumber parsed;
 	if (text.empty()) {
-		return false;
+		return parsed;
 	}
 	// Gate the leading character so both implementations below agree on what
 	// they accept: from_chars takes '-', a digit, '.', or inf/nan, and never
@@ -74,37 +75,35 @@ bool parse_double(std::string_view text, double& value, std::size_t& consumed) {
 	const bool leading_ok = first == '-' || first == '.' || (first >= '0' && first <= '9') ||
 							first == 'i' || first == 'I' || first == 'n' || first == 'N';
 	if (!leading_ok) {
-		return false;
+		return parsed;
 	}
 
 #if SPC_HAS_FP_FROM_CHARS
-	double parsed = 0.0;
 	const std::from_chars_result result =
-		std::from_chars(text.data(), text.data() + text.size(), parsed);
+		std::from_chars(text.data(), text.data() + text.size(), parsed.value);
 	if (result.ec != std::errc{}) {
-		return false;
+		return ParsedNumber{};
 	}
-	value = parsed;
-	consumed = static_cast<std::size_t>(result.ptr - text.data());
-	return true;
+	parsed.consumed = static_cast<std::size_t>(result.ptr - text.data());
+	parsed.ok = true;
+	return parsed;
 #else
 	std::istringstream stream{std::string{text}};
 	stream.imbue(std::locale::classic());
-	double parsed = 0.0;
-	stream >> parsed;
+	stream >> parsed.value;
 	if (stream.fail()) {
-		return false;
+		return ParsedNumber{};
 	}
-	value = parsed;
 	// tellg() reports -1 once the whole buffer was consumed.
-	consumed = text.size();
+	parsed.consumed = text.size();
 	if (!stream.eof()) {
 		const std::streamoff position = stream.tellg();
 		if (position >= 0) {
-			consumed = static_cast<std::size_t>(position);
+			parsed.consumed = static_cast<std::size_t>(position);
 		}
 	}
-	return true;
+	parsed.ok = true;
+	return parsed;
 #endif
 }
 
@@ -122,10 +121,8 @@ double json_number_or_numeric_string(const Json& obj, const char* key) {
 		// Was std::stod, whose strtod honours LC_NUMERIC; see parse_double.
 		// Byte-identical to a C-locale stod for every value in the fixture
 		// corpus, which is what the spc-data byte-identity gate covers.
-		const std::string s = v->get<std::string>();
-		double value = 0.0;
-		std::size_t consumed = 0;
-		return parse_double(s, value, consumed) ? value : 0.0;
+		const ParsedNumber parsed = parse_double(v->get<std::string>());
+		return parsed.ok ? parsed.value : 0.0;
 	}
 	return 0.0;
 }

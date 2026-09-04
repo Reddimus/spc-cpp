@@ -66,9 +66,8 @@ bool has_zero_dn(const Json& props) {
 	// Locale-independent: a comma-decimal strtod stops at the '.' of "0.0",
 	// the full-consume check fails, and the no-risk sentinel ships as a band.
 	const std::string text = dn->get<std::string>();
-	double value = 0.0;
-	std::size_t consumed = 0;
-	return detail::parse_double(text, value, consumed) && value == 0.0 && consumed == text.size();
+	const detail::ParsedNumber parsed = detail::parse_double(text);
+	return parsed.ok && parsed.value == 0.0 && parsed.consumed == text.size();
 }
 
 std::string label_from_dn(const Json& props, FireWeatherLayer layer) {
