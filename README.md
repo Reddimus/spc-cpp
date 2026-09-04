@@ -57,6 +57,14 @@ publishes CAP and WFO polygons, but it omits the SPC parameters represented by
 `ArcGISClient::query_active_watches()` method is deprecated and returns
 `InvalidRequest` instead of fabricating incomplete watches.
 
+Storm reports are the same story: the SPC MapServer publishes no Local Storm
+Report layer, so `ArcGISClient::query_storm_reports()` is deprecated and always
+fails. Use `ArchiveClient::storm_reports()`.
+
+For anything the typed methods do not cover,
+`ArcGISClient::query_layer(service, layer_id, params)` runs a raw paged query
+against any of the three NOAA MapServers and returns the page bodies.
+
 ### Custom networking
 
 `HttpClient` is the default GET transport. Implement `HttpTransport` and pass
@@ -94,6 +102,7 @@ target_link_libraries(myapp PRIVATE spc::spc)
 | --- | --- |
 | `include/spc/` | Public clients, models, errors, and geometry helpers |
 | `src/api/` | Static feed, ArcGIS, and IEM routing |
+| `src/core/` | Errors, geometry, and the rate limiter |
 | `src/models/` | Glaze-backed GeoJSON and Esri parsers |
 | `src/http/` | libcurl transport |
 | `tests/` | Public client tests and captured parser fixtures |
@@ -116,6 +125,8 @@ python3 tools/verify_arcgis_metadata.py  # requires network access
 The normal unit suite does not depend on NOAA availability. The metadata
 command compares the live ArcGIS layer IDs and names with the checked
 2026-09-03 contract, then queries all 39 feature layers.
+
+### JSON library: Glaze (divergence note)
 
 SPC payloads vary in key case, numeric representation, and geometry type. The
 parsers use Glaze 8.3's generic JSON tree to handle those shapes. The original

@@ -4,13 +4,36 @@
 #include "spc/rate_limit.hpp"
 
 #include <algorithm>
+#include <chrono>
 
 namespace spc {
 
+namespace {
+
+/// Config is a public aggregate with no validation, so clamp the two fields
+/// that can otherwise make the limiter misbehave: a non-positive refill
+/// interval divides by zero in refill(), and initial_tokens above max_tokens
+/// hands out a burst the bucket was never sized for.
+RateLimiter::Config sanitized(RateLimiter::Config config) {
+	if (config.refill_interval <= std::chrono::milliseconds::zero()) {
+		config.refill_interval = std::chrono::milliseconds{1000};
+	}
+	config.initial_tokens = std::min(config.initial_tokens, config.max_tokens);
+	return config;
+}
+
+} // namespace
+
 RateLimiter::RateLimiter(Config config)
-	: config_(config), tokens_(config_.initial_tokens),
+	: config_(sanitized(config)), tokens_(config_.initial_tokens),
 	  last_refill_(std::chrono::steady_clock::now()),
 	  day_start_(std::chrono::floor<std::chrono::days>(std::chrono::system_clock::now())) {}
+
+bool RateLimiter::daily_quota_exhausted() noexcept {
+	std::lock_guard<std::mutex> lock(mutex_);
+	check_daily_reset();
+	return config_.daily_limit > 0 && daily_requests_used_ >= config_.daily_limit;
+}
 
 void RateLimiter::check_daily_reset() noexcept {
 	std::chrono::system_clock::time_point now = std::chrono::system_clock::now();
@@ -65,6 +88,11 @@ bool RateLimiter::acquire() {
 		if (try_acquire()) {
 			return true;
 		}
+		// Waiting cannot help: only a UTC-day rollover clears the quota, and
+		// spinning toward midnight is never what the caller wanted.
+		if (daily_quota_exhausted()) {
+			return false;
+		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}
 }
@@ -75,6 +103,9 @@ bool RateLimiter::acquire_for(std::chrono::milliseconds max_wait) {
 	while (std::chrono::steady_clock::now() < deadline) {
 		if (try_acquire()) {
 			return true;
+		}
+		if (daily_quota_exhausted()) {
+			return false;
 		}
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	}

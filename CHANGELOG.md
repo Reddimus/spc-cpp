@@ -6,6 +6,141 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **HTTP 404 now says which kind of 404 it was.** `ErrorCode::FeedUnavailable`
+  ("no active outlook — clear the rows") is produced only by
+  `StaticFeedClient`, the one feed where SPC uses 404 that way. A 404 from the
+  ArcGIS MapServer or from IEM — a retired product, a renamed service path, a
+  wrong base URL — is now `ErrorCode::NotFound`, which was previously
+  unreachable. A logical ArcGIS `{"error":{"code":404}}` envelope, which is how
+  a renamed MapServer path is actually reported (over HTTP 200), maps to
+  `NotFound` as well. Consumers that branch on `is_feed_unavailable()` for
+  `ArcGISClient` or `ArchiveClient` results should treat `NotFound` as a fault
+  and alert on it instead of clearing rows.
+- `Error::from_response` takes a trailing `Feed404` argument stating what a 404
+  means for the feed that answered. It defaults to `Feed404::NotFound`, so
+  existing calls keep compiling and get the safe reading.
+
+### Fixed
+
+- **ArcGIS paging advanced `resultOffset` by the requested page size, not by
+  the records the server returned.** ArcGIS clamps `resultRecordCount` to the
+  layer's own `maxRecordCount`, so a truncated page can be shorter than the
+  2000 requested; the offset then skipped the gap and the caller got a
+  successful result with a silent hole. `ArcGISPager::advance()` now takes the
+  returned record count.
+- **`HttpClient` reached the local filesystem.** `is_absolute_url()` only
+  recognises `http://` and `https://`, so `file:///etc/hosts` was classified as
+  relative, appended to the empty default `base_url`, and handed to libcurl,
+  which read the file and returned it as the response body. The transport now
+  restricts libcurl to `http` and `https` on the request and on redirects, and
+  caps redirects at 10.
+- `ClientConfig::max_response_bytes` (64 MB default) bounds a single response
+  body. An IEM archive window is caller-chosen and unbounded, and the body was
+  buffered whole, then parsed into a full JSON AST, then into the payload.
+- Retry honours a `Retry-After` header on 429/503 (delta-seconds form, clamped
+  to `max_delay`) instead of retrying a server that asked for 60 s after
+  200 ms. The header was already captured and then discarded.
+- Retry jitter is applied before the `max_delay` clamp, not after, so a delay
+  can no longer exceed the documented ceiling by `jitter_factor`. A
+  `max_attempts` of 0 now performs the request once instead of returning a
+  fabricated "Max retry attempts exceeded" for a request never made.
+- The default `User-Agent` is generated from `PROJECT_VERSION` instead of a
+  hard-coded literal, and a test fails if the two ever disagree.
+- **Numeric-as-string probabilities were locale-dependent.** `std::stod`
+  delegates to `strtod`, which honours the process `LC_NUMERIC`. On a
+  comma-decimal host — any application that calls `setlocale(LC_ALL, "")` on a
+  de_DE / fr_FR / pt_BR desktop, as Qt and GTK apps do — `strtod("0.15")`
+  consumed only `"0"` and returned 0 without throwing. The live Day 4-8 static
+  feed carries its probability only as the string `"LABEL": "0.15"`, so the
+  feature was dropped by the `probability > 0.0` gate and
+  `StaticFeedClient::day4_8()` returned a successful, silently empty payload.
+  The same parse gated fire weather's no-risk sentinel filter, so a
+  `"Probability Too Low"` polygon shipped as a real band. Both now go through
+  a locale-independent `spc::detail::parse_double`, which uses
+  `std::from_chars` where the standard library provides it for `double` and a
+  classic-locale stream elsewhere (libc++ only implements floating-point
+  `from_chars` from version 20; the project's clang-tidy job builds against
+  libc++ 18). Output is unchanged in the C locale for every value in the
+  fixture corpus; the parse is narrower than `std::stod` only in rejecting
+  leading whitespace and a leading `+`, neither of which any SPC payload uses.
+- **`RateLimiter` crashed on a zero `refill_interval` (SIGFPE).**
+  `RateLimiter::Config` is a public aggregate with no validation, so
+  `RateLimiter{{.refill_interval = 0ms}}` reached an integer division by zero
+  in `refill()` on the first `try_acquire()`. The constructor now clamps a
+  non-positive interval to the 1000 ms default, and clamps `initial_tokens` to
+  `max_tokens`.
+- **`RateLimiter::acquire()` hung forever once a `daily_limit` was spent.**
+  With no `Config::max_wait` it polls `try_acquire()` every 10 ms, and
+  `try_acquire()` returns false permanently until the next UTC-midnight reset,
+  so the caller's thread spun until then. It now returns false immediately
+  when the daily quota is exhausted, since waiting cannot help.
+- `ArchiveClient` interpolated `ts`, `sts`, `ets` and `wfo` into IEM query URLs
+  with no percent-encoding, while the ArcGIS path in the same file encoded
+  every value. `api.hpp` documents the timestamps as ISO 8601, which permits a
+  `+HH:MM` offset, and a raw `+` decodes server-side as a space — so an
+  offset-bearing timestamp silently queried a different window. An `&` in any
+  of the four injected extra query parameters. All four are now encoded.
+- `ArchiveClient` now bounds its rate-limit wait (5 s) instead of blocking the
+  caller's thread indefinitely, which also makes the documented
+  `ErrorCode::RateLimited` result reachable, and acquires a token per retry
+  attempt rather than per call — `with_retry` re-issues up to 4 requests, and
+  retries precisely on 429/503, so one token was buying up to four requests
+  exactly when IEM was asking for less traffic.
+- ArcGIS paging is bounded. A page that reports truncation while carrying no
+  records, and a server that never stops reporting truncation, now fail with
+  `ErrorCode::ServerError` after at most `ArcGISPager::max_pages()` (100)
+  requests instead of looping forever and growing memory without bound.
+  `ArcGISPager::offset()` is a `std::int64_t`, so the arithmetic cannot
+  overflow.
+
+### Removed
+
+- The two-argument `parse_fire_weather(body, day)` overload. It silently
+  assumed `FireWeatherLayer::Outlook`, so a dry-thunderstorm body decoded
+  `dn=5` as `"ELEV"` (severity 1) instead of `"IDRT"` (severity 0) — the label
+  confusion 0.2.0 fixed, still reachable through the public API. The captured
+  day-1 and day-2 payloads carry no LABEL at all, only the shared numeric
+  `dn`, so nothing in a body says which layer produced it. Pass the layer
+  explicitly: `parse_fire_weather(body, day, FireWeatherLayer::Outlook)`
+  restores the old behaviour where that was in fact the right layer.
+
+- Release builds no longer default to `-march=x86-64-v3`. The probe only
+  proved the *compiler* accepted the flag, never that the run host has
+  AVX2/BMI2/FMA — and this is an installable SDK, so the build host and the run
+  host are routinely different. `-mtune=generic` is the default; set
+  `SPC_TUNE_X86_64_V3=ON` to opt in to the non-portable artifact.
+- The Esri-vs-GeoJSON parity gate now reads every captured fixture pair (three
+  categorical, four probabilistic). The test named for probabilistic parity
+  only ever opened the GeoJSON side, so `parse_esri_rings` was pinned by one
+  categorical layer.
+- The Linux CI jobs generate `de_DE.UTF-8`, so the locale regression tests run
+  there instead of skipping.
+- `ci.yml` declares `permissions: contents: read` at the top level — it runs on
+  `pull_request` and executes third-party build scripts — and pins both actions
+  to full commit SHAs instead of mutable tags.
+- `CLAUDE.md` and `CONTRIBUTING.md` list the `fixtures-check` and `lint-md`
+  gates that CI enforces, `CONTRIBUTING.md` names all seven CI jobs, `make help`
+  lists every target, and the README documents `src/core/`, `query_layer`, and
+  the `JSON library: Glaze (divergence note)` heading the CHANGELOG points at.
+
+### Deprecated
+
+- `ArcGISClient::query_storm_reports()`. The SPC MapServer has no Local Storm
+  Report layer, so the method always failed without touching the network — it
+  now carries the attribute and doc comment its sibling
+  `query_active_watches()` already had. Use `ArchiveClient::storm_reports()`.
+
+### Added
+
+- `ArcGISClient::query_fire_weather()` documents its all-or-nothing contract:
+  it merges two layers, and a failure on either discards both.
+- `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the
+  ArcGIS code in `Error::http_status` only while that code is HTTP-shaped
+  (100..599) and records it in `Error::detail`, so a code such as 1000 can no
+  longer masquerade as an HTTP status.
+
 ## [0.2.0] - 2026-09-03
 
 ### Added

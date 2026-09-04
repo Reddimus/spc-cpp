@@ -6,18 +6,28 @@ on:
   pull_request:
   workflow_dispatch:
 
+# Least privilege by default. The workflow runs on pull_request, and
+# consumer-smoke plus the FetchContent builds clone and execute third-party
+# code, so no job should inherit a writable token. A job that needs more grants
+# itself a narrower block.
+permissions:
+  contents: read
+
 jobs:
   build-linux:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential cmake pkg-config clang-format \
-            libcurl4-openssl-dev
+            libcurl4-openssl-dev locales
+          # The LocaleIndependence tests need a comma-decimal locale; without
+          # one they GTEST_SKIP and the regression they guard goes unchecked.
+          sudo locale-gen de_DE.UTF-8
 
       - name: Build
         run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
@@ -34,7 +44,7 @@ jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Install dependencies
         run: |
@@ -53,18 +63,19 @@ jobs:
   markdown-lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7.0.1
-      - uses: DavidAnson/markdownlint-cli2-action@v23
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23
 
   sanitizer:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
       - name: Build with address and undefined behavior sanitizers
         run: >-
           cmake -S . -B build-sanitized
@@ -78,12 +89,13 @@ jobs:
   thread-sanitizer:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
       - name: Build with ThreadSanitizer
         run: >-
           cmake -S . -B build-thread-sanitized
@@ -97,7 +109,7 @@ jobs:
   clang-tidy:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
@@ -120,10 +132,11 @@ jobs:
   consumer-smoke:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v7.0.1
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
       - run: ./tools/test_consumers.sh

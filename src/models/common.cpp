@@ -10,6 +10,31 @@
 
 #include <format>
 
+// Floating-point std::from_chars is the locale-independent parse the standard
+// intends, but libc++ only implements it from version 20 (the project's own
+// clang-tidy job builds against libc++ 18, where the overload is deleted).
+// libstdc++ and MSVC advertise it through __cpp_lib_to_chars; libc++ does not
+// define that macro at all, so fall back to its version.
+// Definable on the command line to exercise the fallback on a toolchain that
+// has from_chars.
+#ifndef SPC_HAS_FP_FROM_CHARS
+#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
+#define SPC_HAS_FP_FROM_CHARS 1
+#elif defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200000
+#define SPC_HAS_FP_FROM_CHARS 1
+#else
+#define SPC_HAS_FP_FROM_CHARS 0
+#endif
+#endif
+
+#if SPC_HAS_FP_FROM_CHARS
+#include <charconv>
+#include <system_error>
+#else
+#include <locale>
+#include <sstream>
+#endif
+
 namespace spc {
 namespace detail {
 
@@ -38,6 +63,50 @@ std::string json_string(const Json& obj, const char* key) {
 	return {};
 }
 
+ParsedNumber parse_double(std::string_view text) {
+	ParsedNumber parsed;
+	if (text.empty()) {
+		return parsed;
+	}
+	// Gate the leading character so both implementations below agree on what
+	// they accept: from_chars takes '-', a digit, '.', or inf/nan, and never
+	// leading whitespace or '+'.
+	const char first = text.front();
+	const bool leading_ok = first == '-' || first == '.' || (first >= '0' && first <= '9') ||
+							first == 'i' || first == 'I' || first == 'n' || first == 'N';
+	if (!leading_ok) {
+		return parsed;
+	}
+
+#if SPC_HAS_FP_FROM_CHARS
+	const std::from_chars_result result =
+		std::from_chars(text.data(), text.data() + text.size(), parsed.value);
+	if (result.ec != std::errc{}) {
+		return ParsedNumber{};
+	}
+	parsed.consumed = static_cast<std::size_t>(result.ptr - text.data());
+	parsed.ok = true;
+	return parsed;
+#else
+	std::istringstream stream{std::string{text}};
+	stream.imbue(std::locale::classic());
+	stream >> parsed.value;
+	if (stream.fail()) {
+		return ParsedNumber{};
+	}
+	// tellg() reports -1 once the whole buffer was consumed.
+	parsed.consumed = text.size();
+	if (!stream.eof()) {
+		const std::streamoff position = stream.tellg();
+		if (position >= 0) {
+			parsed.consumed = static_cast<std::size_t>(position);
+		}
+	}
+	parsed.ok = true;
+	return parsed;
+#endif
+}
+
 /// SPC ships `LABEL` as either a string ("SLGT", "5") or a number (5). Always
 /// returns a numeric view; non-numeric / missing yields 0.
 double json_number_or_numeric_string(const Json& obj, const char* key) {
@@ -49,12 +118,11 @@ double json_number_or_numeric_string(const Json& obj, const char* key) {
 		return v->get<double>();
 	}
 	if (v->is_string()) {
-		const std::string s = v->get<std::string>();
-		try {
-			return std::stod(s);
-		} catch (...) {
-			return 0.0;
-		}
+		// Was std::stod, whose strtod honours LC_NUMERIC; see parse_double.
+		// Byte-identical to a C-locale stod for every value in the fixture
+		// corpus, which is what the spc-data byte-identity gate covers.
+		const ParsedNumber parsed = parse_double(v->get<std::string>());
+		return parsed.ok ? parsed.value : 0.0;
 	}
 	return 0.0;
 }

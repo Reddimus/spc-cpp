@@ -9,6 +9,7 @@
 
 #include <array>
 #include <cctype>
+#include <chrono>
 #include <format>
 #include <memory>
 #include <string>
@@ -126,6 +127,15 @@ std::string percent_encode(std::string_view value) {
 	return encoded;
 }
 
+/// IEM is a courtesy third party, so the bucket stays small — but the wait
+/// must be bounded, or `RateLimiter::acquire()` blocks the caller's thread
+/// forever and the documented `ErrorCode::RateLimited` result is unreachable.
+RateLimiter::Config archive_rate_limit() {
+	RateLimiter::Config config;
+	config.max_wait = std::chrono::seconds{5};
+	return config;
+}
+
 const char* service_base(ArcGISService service) {
 	switch (service) {
 		case ArcGISService::Outlooks:
@@ -138,7 +148,19 @@ const char* service_base(ArcGISService service) {
 	return kArcGisOutlks;
 }
 
-Result<bool> inspect_arcgis_envelope(const std::string& body) {
+/// What `paged()` needs from one ArcGIS response envelope: whether the server
+/// truncated the result, and how many records it actually returned.
+struct ArcGISEnvelope {
+	std::int32_t feature_count{0};
+	bool exceeded_transfer_limit{false};
+};
+
+bool envelope_flag(const Json& root, const char* key) {
+	const Json* flag = detail::lookup(root, key);
+	return flag != nullptr && flag->is_boolean() && flag->get<bool>();
+}
+
+Result<ArcGISEnvelope> inspect_arcgis_envelope(const std::string& body) {
 	const glz::expected<Json, std::string> root = detail::parse_root(body);
 	if (!root) {
 		return std::unexpected(Error::parse(root.error()));
@@ -147,22 +169,42 @@ Result<bool> inspect_arcgis_envelope(const std::string& body) {
 	if (error != nullptr && error->is_object()) {
 		const double raw_code = detail::json_number_or_numeric_string(*error, "code");
 		const int code = raw_code > 0.0 ? static_cast<int>(raw_code) : 400;
-		return std::unexpected(Error::from_response(code, body));
+		// A logical ArcGIS failure travels over HTTP 200, so it must not go
+		// through the HTTP status mapper: an ArcGIS code 404 (renamed or
+		// retired service path) is a genuine NotFound, and a code like 1000
+		// is not an HTTP status at all.
+		return std::unexpected(Error::from_arcgis(code, body));
 	}
-	const Json* exceeded = detail::lookup(*root, "exceededTransferLimit");
-	return exceeded != nullptr && exceeded->is_boolean() && exceeded->get<bool>();
+	ArcGISEnvelope envelope;
+	// Verified live against SPC_wx_outlks layer 1 with resultRecordCount=1:
+	// `f=json` carries the flag at the root, `f=geojson` carries it at the
+	// root AND under `properties`. Read both so either shape is honoured.
+	envelope.exceeded_transfer_limit = envelope_flag(*root, "exceededTransferLimit");
+	if (!envelope.exceeded_transfer_limit) {
+		const Json* properties = detail::lookup(*root, "properties");
+		envelope.exceeded_transfer_limit =
+			properties != nullptr && envelope_flag(*properties, "exceededTransferLimit");
+	}
+	// Esri (`f=json`) and GeoJSON (`f=geojson`) both name the array `features`.
+	const Json* features = detail::lookup(*root, "features");
+	if (features != nullptr && features->is_array()) {
+		envelope.feature_count = static_cast<std::int32_t>(features->get_array().size());
+	}
+	return envelope;
 }
 
-/// SPC 404 == "no active outlook" (FeedUnavailable). Map HTTP status to the
-/// right error; only a real body is handed to the parser.
-Result<std::string> body_or_error(Result<HttpResponse> r) {
+/// Map HTTP status to the right error; only a real body is handed to the
+/// parser. `semantics` is the trust boundary: only the SPC static feeds may
+/// read a 404 as "no active outlook" (FeedUnavailable). For every other host
+/// a 404 is a retired or wrong URL, i.e. NotFound.
+Result<std::string> body_or_error(Result<HttpResponse> r, Feed404 semantics) {
 	if (!r) {
 		return std::unexpected(r.error());
 	}
 	if (r->status_code == 200) {
 		return std::move(r->body);
 	}
-	return std::unexpected(Error::from_response(r->status_code, r->body));
+	return std::unexpected(Error::from_response(r->status_code, r->body, semantics));
 }
 
 } // namespace
@@ -191,8 +233,8 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
 	}
 	const std::string url = std::format("{}day{}otlk_cat.nolyr.geojson", kStaticBase, day);
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+	Result<std::string> body = body_or_error(
+		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -219,8 +261,8 @@ Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 	const std::string filename = day == 3 ? "day3otlk_prob.nolyr.geojson"
 										  : std::format("day{}otlk_{}.nolyr.geojson", day, tag);
 	const std::string url = std::string{kStaticBase} + filename;
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+	Result<std::string> body = body_or_error(
+		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -237,8 +279,8 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
 			Error::invalid_request("extended outlook day must be between 4 and 8"));
 	}
 	const std::string url = std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day);
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+	Result<std::string> body = body_or_error(
+		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -281,16 +323,25 @@ struct ArcGISClient::Impl {
 				url += "&outSR=" + percent_encode(out_spatial_reference);
 			}
 			Result<std::string> body =
-				body_or_error(with_retry([&] { return http->get(url); }, retry));
+				body_or_error(with_retry([&] { return http->get(url); }, retry), Feed404::NotFound);
 			if (!body) {
 				return std::unexpected(body.error());
 			}
-			const Result<bool> exceeded = inspect_arcgis_envelope(*body);
-			if (!exceeded) {
-				return std::unexpected(exceeded.error());
+			const Result<ArcGISEnvelope> envelope = inspect_arcgis_envelope(*body);
+			if (!envelope) {
+				return std::unexpected(envelope.error());
+			}
+			if (envelope->exceeded_transfer_limit && envelope->feature_count == 0) {
+				// The offset would never move: paging cannot converge.
+				return std::unexpected(
+					Error::server("ArcGIS reported a truncated page containing no records"));
 			}
 			pages.push_back(std::move(*body));
-			pager.advance(*exceeded);
+			pager.advance(envelope->feature_count, envelope->exceeded_transfer_limit);
+		}
+		if (pager.page_limit_reached()) {
+			return std::unexpected(Error::server(
+				std::format("ArcGIS paging did not converge within {} pages", pager.max_pages())));
 		}
 		return pages;
 	}
@@ -516,7 +567,7 @@ struct ArchiveClient::Impl {
 			  r.initial_delay = std::chrono::milliseconds{500};
 			  return r;
 		  }()),
-		  limiter(RateLimiter::Config{}) {}
+		  limiter(archive_rate_limit()) {}
 
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
 		: http(usable_transport(std::move(transport))), retry([] {
@@ -525,7 +576,22 @@ struct ArchiveClient::Impl {
 			  policy.initial_delay = std::chrono::milliseconds{500};
 			  return policy;
 		  }()),
-		  limiter(RateLimiter::Config{}) {}
+		  limiter(archive_rate_limit()) {}
+
+	/// Pay a token per *attempt*, not per call: `with_retry` re-issues the
+	/// request up to `max_attempts` times, and it retries precisely on
+	/// 429/503 — the responses in which IEM is asking for less traffic.
+	/// Acquiring once outside the retry loop undercounted the budget by 4x.
+	Result<HttpResponse> rate_limited_get(const std::string& url) {
+		return with_retry(
+			[&]() -> Result<HttpResponse> {
+				if (!limiter.acquire()) {
+					return std::unexpected(Error::rate_limited("IEM rate limit"));
+				}
+				return http->get(url);
+			},
+			retry);
+	}
 };
 
 ArchiveClient::ArchiveClient(ClientConfig config)
@@ -537,15 +603,14 @@ ArchiveClient::ArchiveClient(ArchiveClient&&) noexcept = default;
 ArchiveClient& ArchiveClient::operator=(ArchiveClient&&) noexcept = default;
 
 Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
-	if (!impl_->limiter.acquire()) {
-		return std::unexpected(Error::rate_limited("IEM rate limit"));
-	}
+	// `ts` is caller-supplied and reaches a query string, so it is encoded
+	// like every ArcGIS query value: an unencoded '&' would inject a
+	// parameter and an unencoded '+' would decode server-side as a space.
 	std::string url = std::format("{}json/spcwatch.py", kIemBase);
 	if (!ts.empty()) {
-		url += std::format("?ts={}", ts);
+		url += "?ts=" + percent_encode(ts);
 	}
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+	Result<std::string> body = body_or_error(impl_->rate_limited_get(url), Feed404::NotFound);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
@@ -560,16 +625,14 @@ Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
 Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start_iso,
 														const std::string& end_iso,
 														const std::string& wfo) {
-	if (!impl_->limiter.acquire()) {
-		return std::unexpected(Error::rate_limited("IEM rate limit"));
-	}
-	std::string url =
-		std::format("{}geojson/lsr.geojson?sts={}&ets={}", kIemBase, start_iso, end_iso);
+	// api.hpp documents these as ISO 8601, which permits a "+HH:MM" offset; a
+	// raw '+' decodes server-side as a space and silently shifts the window.
+	std::string url = std::format("{}geojson/lsr.geojson?sts={}&ets={}", kIemBase,
+								  percent_encode(start_iso), percent_encode(end_iso));
 	if (!wfo.empty()) {
-		url += std::format("&wfo={}", wfo);
+		url += "&wfo=" + percent_encode(wfo);
 	}
-	Result<std::string> body =
-		body_or_error(with_retry([&] { return impl_->http->get(url); }, impl_->retry));
+	Result<std::string> body = body_or_error(impl_->rate_limited_get(url), Feed404::NotFound);
 	if (!body) {
 		return std::unexpected(body.error());
 	}

@@ -22,6 +22,9 @@ add_library(spc_http STATIC
 )
 spc_configure_target(spc_http)
 target_link_libraries(spc_http PUBLIC spc_core CURL::libcurl)
+# The default User-Agent lives in an installed public header, so the version
+# has to reach consumers too. PUBLIC exports it through spcTargets.cmake.
+target_compile_definitions(spc_http PUBLIC SPC_VERSION_STRING="${PROJECT_VERSION}")
 target_include_directories(spc_http PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

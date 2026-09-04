@@ -63,13 +63,11 @@ bool has_zero_dn(const Json& props) {
 	if (!dn->is_string()) {
 		return false;
 	}
+	// Locale-independent: a comma-decimal strtod stops at the '.' of "0.0",
+	// the full-consume check fails, and the no-risk sentinel ships as a band.
 	const std::string text = dn->get<std::string>();
-	std::size_t consumed = 0;
-	try {
-		return std::stod(text, &consumed) == 0.0 && consumed == text.size();
-	} catch (...) {
-		return false;
-	}
+	const detail::ParsedNumber parsed = detail::parse_double(text);
+	return parsed.ok && parsed.value == 0.0 && parsed.consumed == text.size();
 }
 
 std::string label_from_dn(const Json& props, FireWeatherLayer layer) {
@@ -110,10 +108,6 @@ std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
 		return 3;
 	}
 	return 0; // dry-thunderstorm bands (IDRT/SDRT) and unknowns: label-only
-}
-
-FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day) {
-	return parse_fire_weather(body, day, FireWeatherLayer::Outlook);
 }
 
 FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,

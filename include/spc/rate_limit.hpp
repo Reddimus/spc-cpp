@@ -18,9 +18,11 @@ namespace spc {
 class RateLimiter {
 public:
 	struct Config {
-		std::uint16_t max_tokens = 2;					 ///< default: gentle on IEM
-		std::chrono::milliseconds refill_interval{1000}; ///< 1 token / sec
-		std::uint16_t initial_tokens = 2;
+		std::uint16_t max_tokens = 2; ///< default: gentle on IEM
+		/// Time per token. Clamped to 1000 ms if set to zero or less.
+		std::chrono::milliseconds refill_interval{1000};
+		std::uint16_t initial_tokens = 2; ///< clamped to `max_tokens`
+		/// Longest `acquire()` may block. Unset means block indefinitely.
 		std::optional<std::chrono::milliseconds> max_wait;
 		std::int32_t daily_limit{0}; ///< 0 = no daily cap
 	};
@@ -28,6 +30,13 @@ public:
 	explicit RateLimiter(Config config);
 
 	[[nodiscard]] bool try_acquire() noexcept;
+
+	/// Block until a token is available. With `Config::max_wait` set this is
+	/// `acquire_for(*max_wait)`; without it the wait is unbounded, so a
+	/// synchronous caller can stall for as long as the bucket stays empty.
+	/// Returns false only on a bounded wait that expired, or when a
+	/// configured `daily_limit` is spent — no amount of waiting clears that
+	/// before the next UTC day, so it fails immediately rather than spinning.
 	[[nodiscard]] bool acquire();
 	[[nodiscard]] bool acquire_for(std::chrono::milliseconds max_wait);
 	[[nodiscard]] std::uint16_t available_tokens() const noexcept;
@@ -38,6 +47,7 @@ public:
 private:
 	void refill() noexcept;
 	void check_daily_reset() noexcept;
+	[[nodiscard]] bool daily_quota_exhausted() noexcept;
 
 	Config config_;
 	mutable std::mutex mutex_;

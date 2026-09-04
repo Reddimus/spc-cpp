@@ -4,6 +4,9 @@ add_executable(spc_tests
     test_parser.cpp
     test_corpus.cpp
     test_arcgis.cpp
+    test_rate_limit.cpp
+    test_locale.cpp
+    test_retry.cpp
 )
 target_link_libraries(spc_tests PRIVATE
     spc_api
@@ -11,6 +14,7 @@ target_link_libraries(spc_tests PRIVATE
 )
 target_compile_definitions(spc_tests PRIVATE
     SPC_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    SPC_PROJECT_VERSION="${PROJECT_VERSION}"
 )
 target_compile_options(spc_tests PRIVATE -Wall -Wextra -Wpedantic)
 include(GoogleTest)
