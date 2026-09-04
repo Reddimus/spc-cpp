@@ -8,9 +8,23 @@ namespace spc {
 
 namespace {
 
+/// Accumulates the body, refusing to grow past a ceiling. Returning a short
+/// count makes libcurl abort the transfer with CURLE_WRITE_ERROR.
+struct BodySink {
+	std::string body;
+	std::size_t limit{0};
+	bool overflowed{false};
+};
+
 std::size_t write_cb(char* ptr, std::size_t size, std::size_t nmemb, void* user) {
-	static_cast<std::string*>(user)->append(ptr, size * nmemb);
-	return size * nmemb;
+	BodySink* sink = static_cast<BodySink*>(user);
+	const std::size_t chunk = size * nmemb;
+	if (sink->limit > 0 && sink->body.size() + chunk > sink->limit) {
+		sink->overflowed = true;
+		return 0;
+	}
+	sink->body.append(ptr, chunk);
+	return chunk;
 }
 
 std::size_t header_cb(char* buffer, std::size_t size, std::size_t nitems, void* userdata) {
@@ -101,16 +115,23 @@ Result<HttpResponse> HttpClient::get(std::string_view path) const {
 	CURL* curl = impl_->curl;
 	const std::string url =
 		is_absolute_url(path) ? std::string{path} : impl_->config.base_url + std::string{path};
-	std::string body;
+	BodySink sink;
+	sink.limit = impl_->config.max_response_bytes;
 	std::vector<std::pair<std::string, std::string>> response_headers;
 
 	curl_easy_reset(curl);
 	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &body);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
 	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, &header_cb);
 	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_headers);
 	curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(impl_->config.timeout.count()));
+	// This SDK speaks to public HTTP(S) endpoints only. Without this libcurl
+	// happily honours file://, dict://, scp:// and friends, and a path built
+	// from user input becomes a local-file read.
+	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
+	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
+	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
 	// Parity with spc-data/src/fetcher.cpp:
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
@@ -121,6 +142,10 @@ Result<HttpResponse> HttpClient::get(std::string_view path) const {
 
 	CURLcode rc = curl_easy_perform(curl);
 	if (rc != CURLE_OK) {
+		if (sink.overflowed) {
+			return std::unexpected(Error::network(
+				"response exceeded ClientConfig::max_response_bytes"));
+		}
 		return std::unexpected(Error::network(curl_easy_strerror(rc)));
 	}
 
@@ -129,7 +154,7 @@ Result<HttpResponse> HttpClient::get(std::string_view path) const {
 
 	return HttpResponse{
 		static_cast<std::int16_t>(http_code),
-		std::move(body),
+		std::move(sink.body),
 		std::move(response_headers),
 	};
 }

@@ -30,6 +30,24 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   2000 requested; the offset then skipped the gap and the caller got a
   successful result with a silent hole. `ArcGISPager::advance()` now takes the
   returned record count.
+- **`HttpClient` reached the local filesystem.** `is_absolute_url()` only
+  recognises `http://` and `https://`, so `file:///etc/hosts` was classified as
+  relative, appended to the empty default `base_url`, and handed to libcurl,
+  which read the file and returned it as the response body. The transport now
+  restricts libcurl to `http` and `https` on the request and on redirects, and
+  caps redirects at 10.
+- `ClientConfig::max_response_bytes` (64 MB default) bounds a single response
+  body. An IEM archive window is caller-chosen and unbounded, and the body was
+  buffered whole, then parsed into a full JSON AST, then into the payload.
+- Retry honours a `Retry-After` header on 429/503 (delta-seconds form, clamped
+  to `max_delay`) instead of retrying a server that asked for 60 s after
+  200 ms. The header was already captured and then discarded.
+- Retry jitter is applied before the `max_delay` clamp, not after, so a delay
+  can no longer exceed the documented ceiling by `jitter_factor`. A
+  `max_attempts` of 0 now performs the request once instead of returning a
+  fabricated "Max retry attempts exceeded" for a request never made.
+- The default `User-Agent` is generated from `PROJECT_VERSION` instead of a
+  hard-coded literal, and a test fails if the two ever disagree.
 - **Numeric-as-string probabilities were locale-dependent.** `std::stod`
   delegates to `strtod`, which honours the process `LC_NUMERIC`. On a
   comma-decimal host — any application that calls `setlocale(LC_ALL, "")` on a

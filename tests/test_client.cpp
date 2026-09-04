@@ -452,6 +452,30 @@ TEST(ArchiveClientRouting, PercentEncodesIsoOffsetsAndTheWfoFilter) {
 			  "&wfo=ICT%26sts%3D1900-01-01");
 }
 
+TEST(HttpClientLifecycle, DefaultUserAgentCarriesTheProjectVersion) {
+	// The UA string is a literal in an installed header; nothing tied it to
+	// project(spc-cpp VERSION ...), so a release bump left every outbound
+	// request to NOAA and IEM announcing the previous version.
+	const ClientConfig config;
+
+	EXPECT_NE(config.user_agent.find(SPC_PROJECT_VERSION), std::string::npos)
+		<< "user_agent \"" << config.user_agent << "\" does not carry version "
+		<< SPC_PROJECT_VERSION;
+}
+
+TEST(HttpClientLifecycle, RefusesEverySchemeOtherThanHttpAndHttps) {
+	// is_absolute_url() only recognises http:// and https://, so a file:// URL
+	// was treated as relative, concatenated onto the empty default base_url,
+	// and handed to libcurl — which read the local file and returned it as the
+	// response body. Nothing in this SDK's scope should reach the filesystem.
+	const HttpClient client;
+
+	const Result<HttpResponse> result = client.get("file:///etc/hosts");
+
+	ASSERT_FALSE(result) << "file:// must not be fetched";
+	EXPECT_EQ(result.error().code, ErrorCode::NetworkError);
+}
+
 TEST(HttpClientLifecycle, ConcurrentClientsShareProcessWideCurlState) {
 	std::vector<std::thread> workers;
 	workers.reserve(16);
