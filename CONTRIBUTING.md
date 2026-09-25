@@ -97,6 +97,16 @@ make fixtures-check
 
 Say where the file came from in `tests/fixtures/README.md`.
 
+`tests/golden/` holds each parser's output on the fixtures as text, and
+`tests/test_golden.cpp` fails when that output changes. A new fixture needs
+a case there, or a place in its list of fixtures no parser reads. When a
+change to parsed output is intended, rewrite the files and review the diff:
+
+```bash
+SPC_UPDATE_GOLDEN=1 ./build/tests/spc_tests --gtest_filter='Parsers/Golden.*'
+git diff tests/golden
+```
+
 ## Benchmarks
 
 `make bench` builds the Google Benchmark suite in `build-bench`, a Release

@@ -48,6 +48,8 @@ when you touch ArcGIS layer ids; it needs the network.
 - IEM's `lsr.geojson` filters by office with `wfos=`; it ignores `wfo=`.
 - After changing a fixture, regenerate `tests/fixtures/SHA256SUMS` (recipe in
   CONTRIBUTING.md).
+- `tests/golden/` snapshots every parser's output. Rewrite it (CONTRIBUTING.md)
+  only for an intended output change, and review the diff.
 - Docs and comments stay short: say why, leave history to git and the
   changelog.
 
