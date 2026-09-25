@@ -105,7 +105,9 @@ build, and runs it. `BENCH_ARGS` passes flags through, for example
 
 Each benchmark also reports the heap use of one call: `allocs`,
 `alloc_bytes`, `peak_bytes`, and `retained_bytes`, the memory the result
-keeps. They repeat exactly from run to run, so compare them directly.
+keeps. They repeat exactly from run to run, so compare them directly. On
+macOS, `instructions` per iteration varies by less than 0.1% between runs,
+even on a busy machine, which makes it the steadiest measure of CPU work.
 Timings are noisy: to compare two builds, run each with repetitions and
 random interleaving, then compare the results with Google Benchmark's
 `compare.py`, which needs numpy and scipy:

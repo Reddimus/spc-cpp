@@ -4,7 +4,8 @@
 /// Each benchmark also reports the heap use of one call, measured outside
 /// the timing loop: `allocs` and `alloc_bytes` (operator new calls and the
 /// bytes they asked for), `peak_bytes` (the most memory live at once), and
-/// `retained_bytes` (what the result holds).
+/// `retained_bytes` (what the result holds). On macOS it reports
+/// `instructions` per iteration too, which barely moves with machine load.
 
 #include "models/json.hpp"
 #include "spc/api.hpp"
@@ -30,6 +31,12 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#if defined(__APPLE__)
+#include <libproc.h>
+#include <sys/resource.h>
+#include <unistd.h>
+#endif
 
 namespace {
 
@@ -91,6 +98,18 @@ bool has_output(const spc::Result<T>& result) {
 	return result.has_value() && has_output(*result);
 }
 
+/// Instructions this process has retired so far, or 0 where the OS doesn't
+/// report them.
+std::uint64_t instructions_retired() noexcept {
+#if defined(__APPLE__)
+	rusage_info_v4 info{};
+	if (proc_pid_rusage(getpid(), RUSAGE_INFO_V4, reinterpret_cast<rusage_info_t*>(&info)) == 0) {
+		return info.ri_instructions;
+	}
+#endif
+	return 0;
+}
+
 /// Times `call`, which reads `bytes` of input, and reports the heap use of
 /// one warm call.
 template <typename Call>
@@ -108,9 +127,15 @@ void run(benchmark::State& state, std::size_t bytes, const Call& call) {
 		// Read while `output` is alive, so its memory counts as retained.
 		heap = probe.stats();
 	}
+	const std::uint64_t first = instructions_retired();
 	for (auto _ : state) { // auto-ok: Google Benchmark loop idiom
 		Output output = call();
 		benchmark::DoNotOptimize(output);
+	}
+	const std::uint64_t last = instructions_retired();
+	if (first != 0 && last > first) {
+		state.counters["instructions"] = benchmark::Counter(static_cast<double>(last - first),
+															benchmark::Counter::kAvgIterations);
 	}
 	state.SetBytesProcessed(state.iterations() * static_cast<std::int64_t>(bytes));
 	state.counters["allocs"] = static_cast<double>(heap.allocations);

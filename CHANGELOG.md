@@ -10,7 +10,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `make bench` runs a Google Benchmark suite over every parser and the
   ArcGIS and static-feed clients. Each benchmark also reports the
-  allocations and peak and retained heap of one call. The
+  allocations and peak and retained heap of one call, and on macOS the
+  instructions per call. The
   `SPC_BUILD_BENCHMARKS` option that builds it is off by default and
   installs nothing.
 
