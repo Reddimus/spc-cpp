@@ -5,8 +5,7 @@ config:
   MD040: false
   MD041: false
   MD060: false
-  # MD004 disables ul-style enforcement so a literal "+" at the start of
-  # an indented continuation line isn't misread as a "+"-style list item.
+  # A "+" starting a wrapped line would otherwise read as a list marker.
   MD004: false
   MD024:
     siblings_only: true

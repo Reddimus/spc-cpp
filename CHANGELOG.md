@@ -6,7 +6,92 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Watch::year`. Watch numbers restart every year, so `number` alone is not
+  unique. `StormReport::wfo` names the issuing NWS office.
+- `spc/version.hpp` with `SPC_VERSION_MAJOR`, `SPC_VERSION_MINOR`,
+  `SPC_VERSION_PATCH`, `SPC_VERSION_STRING`, and `spc::version()`.
+- `point_in_feature` accepts any feature with `rings`: fire weather, Day 4-8,
+  conditional intensity, watches, and mesoscale discussions.
+- `QueryParams::order_by_fields`, default `objectid`, so ArcGIS pages stay
+  stable while paging.
+- The `SPC_INSTALL` CMake option.
+- Examples for fire weather and watches.
+
+### Changed
+
+- **Breaking:** Glaze is now private. No installed header includes it, the
+  install no longer ships its headers, and `spc/models/common.hpp`,
+  `spc::Json`, and `spc::detail` are gone from the public API.
+- **Breaking:** `find_package(spc X.Y)` accepts only the same minor version
+  while the major version is 0, because minor releases may break the API.
+- **Breaking:** CMake 3.21 and libcurl 7.85 are now the minimums, and both
+  are checked at configure time.
+- `HttpClient` is safe to share between threads. Concurrent calls use a pool
+  of libcurl handles, which keeps connections open between requests. Client
+  methods are `const`, and client string parameters take `std::string_view`.
+- `HttpResponse::headers` holds only the final response's headers, not those
+  of redirect hops.
+- `ArcGISClient` parses each page as it arrives and moves its features into
+  the result, so peak memory is one page plus the result.
+- `RateLimiter::acquire()` sleeps until the next token is due instead of
+  polling every 10 ms, and a bounded wait returns false at once when no token
+  can arrive in time.
+- `ArcGISClient::query_layer` rejects a `QueryParams::f` other than `json`,
+  `pjson`, or `geojson` before sending anything.
+- Tests, examples, and install rules are on by default only in a top-level
+  build, so FetchContent consumers no longer download GoogleTest.
+- `SPC_ENABLE_LTO` is off by default. LTO put compiler-specific bitcode in the
+  installed static libraries, which another compiler or compiler version
+  could not link.
+- CI runs the tests with Clang 18 and libc++, the only toolchain that uses the
+  locale-independent number parser's fallback. The release workflow now runs
+  the tests and consumer checks before publishing.
+
+### Removed
+
+- **Breaking:** `ArcGISClient::query_active_watches()` and
+  `ArcGISClient::query_storm_reports()`, deprecated since 0.2.0 and 0.3.0.
+  They always failed. Use `ArchiveClient::watches()` and
+  `ArchiveClient::storm_reports()`.
+- **Breaking:** `ArcGISClient::query_layer(layer_id, params)`. Pass
+  `ArcGISService::Outlooks` to the three-argument overload.
+- `spc/geo.hpp` and `RetryResult`, which nothing used.
+- The `SPC_NATIVE_ARCH` and `SPC_TUNE_X86_64_V3` options and the forced
+  Release flags. Set `CMAKE_CXX_FLAGS` to tune a build.
+
+### Fixed
+
+- `ArchiveClient::storm_reports(start, end, wfo)` returned reports from every
+  office. IEM ignores `wfo=` on `lsr.geojson` and filters on `wfos=`.
+- `ArcGISClient::query_active_md()` reported NOAA's `NoArea` placeholder as a
+  discussion when none was active.
+- If the runtime libcurl rejected `CURLOPT_PROTOCOLS_STR`, `HttpClient` sent the
+  request anyway and could read `file://` URLs. It now fails the request.
+- An allocation failure in the libcurl write callback threw through C code.
+- A `Retry-After` header on a redirect hop could set the retry delay.
+- libcurl's global cleanup could run before a client created during static
+  initialization freed its handle.
+- Percent-encoding used `std::isalnum`, which accepts bytes above 0x7F in
+  macOS UTF-8 locales, so those bytes reached the URL unencoded.
+- A watch number or ArcGIS error code of `inf`, `nan`, or out of `int32`
+  range was cast to an integer, which is undefined behavior.
+- `RateLimiter` dropped the partial interval on every refill, so tokens
+  arrived more slowly than configured. A `max_tokens` of 0 made `acquire()`
+  wait forever; it is now treated as 1.
+- A default-constructed `Error` left `code` uninitialized.
+
 ## [0.3.0] - 2026-09-04
+
+### Added
+
+- `ArcGISClient::query_fire_weather()` documents its all-or-nothing contract:
+  it merges two layers, and a failure on either discards both.
+- `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the
+  ArcGIS code in `Error::http_status` only while that code is HTTP-shaped
+  (100..599) and records it in `Error::detail`, so a code such as 1000 can no
+  longer masquerade as an HTTP status.
 
 ### Changed
 
@@ -23,6 +108,32 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Error::from_response` takes a trailing `Feed404` argument stating what a 404
   means for the feed that answered. It defaults to `Feed404::NotFound`, so
   existing calls keep compiling and get the safe reading.
+- Release builds no longer default to `-march=x86-64-v3`. The compiler check
+  proved only that the compiler accepted the flag, not that the machine
+  running the code has AVX2. Set `SPC_TUNE_X86_64_V3=ON` to opt in.
+- The Esri-vs-GeoJSON parity test covers every captured fixture pair, not
+  just day 1 categorical.
+- CI generates `de_DE.UTF-8` so the locale tests run instead of skipping,
+  runs with a read-only token, and pins actions to commit SHAs.
+- The docs list every CI gate and `make` target.
+
+### Deprecated
+
+- `ArcGISClient::query_storm_reports()`. The SPC MapServer has no Local Storm
+  Report layer, so the method always failed without touching the network — it
+  now carries the attribute and doc comment its sibling
+  `query_active_watches()` already had. Use `ArchiveClient::storm_reports()`.
+
+### Removed
+
+- The two-argument `parse_fire_weather(body, day)` overload. It silently
+  assumed `FireWeatherLayer::Outlook`, so a dry-thunderstorm body decoded
+  `dn=5` as `"ELEV"` (severity 1) instead of `"IDRT"` (severity 0) — the label
+  confusion 0.2.0 fixed, still reachable through the public API. The captured
+  day-1 and day-2 payloads carry no LABEL at all, only the shared numeric
+  `dn`, so nothing in a body says which layer produced it. Pass the layer
+  explicitly: `parse_fire_weather(body, day, FireWeatherLayer::Outlook)`
+  restores the old behaviour where that was in fact the right layer.
 
 ### Fixed
 
@@ -82,8 +193,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with no percent-encoding, while the ArcGIS path in the same file encoded
   every value. `api.hpp` documents the timestamps as ISO 8601, which permits a
   `+HH:MM` offset, and a raw `+` decodes server-side as a space — so an
-  offset-bearing timestamp silently queried a different window. An `&` in any
-  of the four injected extra query parameters. All four are now encoded.
+  offset-bearing timestamp silently queried a different window, and an `&` in
+  any of the four injected extra query parameters. All four are now encoded.
 - `ArchiveClient` now bounds its rate-limit wait (5 s) instead of blocking the
   caller's thread indefinitely, which also makes the documented
   `ErrorCode::RateLimited` result reachable, and acquires a token per retry
@@ -96,52 +207,6 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   requests instead of looping forever and growing memory without bound.
   `ArcGISPager::offset()` is a `std::int64_t`, so the arithmetic cannot
   overflow.
-
-### Removed
-
-- The two-argument `parse_fire_weather(body, day)` overload. It silently
-  assumed `FireWeatherLayer::Outlook`, so a dry-thunderstorm body decoded
-  `dn=5` as `"ELEV"` (severity 1) instead of `"IDRT"` (severity 0) — the label
-  confusion 0.2.0 fixed, still reachable through the public API. The captured
-  day-1 and day-2 payloads carry no LABEL at all, only the shared numeric
-  `dn`, so nothing in a body says which layer produced it. Pass the layer
-  explicitly: `parse_fire_weather(body, day, FireWeatherLayer::Outlook)`
-  restores the old behaviour where that was in fact the right layer.
-
-- Release builds no longer default to `-march=x86-64-v3`. The probe only
-  proved the *compiler* accepted the flag, never that the run host has
-  AVX2/BMI2/FMA — and this is an installable SDK, so the build host and the run
-  host are routinely different. `-mtune=generic` is the default; set
-  `SPC_TUNE_X86_64_V3=ON` to opt in to the non-portable artifact.
-- The Esri-vs-GeoJSON parity gate now reads every captured fixture pair (three
-  categorical, four probabilistic). The test named for probabilistic parity
-  only ever opened the GeoJSON side, so `parse_esri_rings` was pinned by one
-  categorical layer.
-- The Linux CI jobs generate `de_DE.UTF-8`, so the locale regression tests run
-  there instead of skipping.
-- `ci.yml` declares `permissions: contents: read` at the top level — it runs on
-  `pull_request` and executes third-party build scripts — and pins both actions
-  to full commit SHAs instead of mutable tags.
-- `CLAUDE.md` and `CONTRIBUTING.md` list the `fixtures-check` and `lint-md`
-  gates that CI enforces, `CONTRIBUTING.md` names all seven CI jobs, `make help`
-  lists every target, and the README documents `src/core/`, `query_layer`, and
-  the `JSON library: Glaze (divergence note)` heading the CHANGELOG points at.
-
-### Deprecated
-
-- `ArcGISClient::query_storm_reports()`. The SPC MapServer has no Local Storm
-  Report layer, so the method always failed without touching the network — it
-  now carries the attribute and doc comment its sibling
-  `query_active_watches()` already had. Use `ArchiveClient::storm_reports()`.
-
-### Added
-
-- `ArcGISClient::query_fire_weather()` documents its all-or-nothing contract:
-  it merges two layers, and a failure on either discards both.
-- `Error::from_arcgis`, for ArcGIS logical failure envelopes. It keeps the
-  ArcGIS code in `Error::http_status` only while that code is HTTP-shaped
-  (100..599) and records it in `Error::detail`, so a code such as 1000 can no
-  longer masquerade as an HTTP status.
 
 ## [0.2.0] - 2026-09-03
 
@@ -165,6 +230,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - libcurl global state now initializes once per process instead of once per
   client.
 
+### Deprecated
+
+- `ArcGISClient::query_active_watches()`. NOAA's WWA polygons do not contain
+  the SPC fields in `WatchPayload`; use `ArchiveClient::watches()`.
+
 ### Fixed
 
 - Corrected the Day 2 tornado and hail probability layers, Day 3 probability,
@@ -174,11 +244,6 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Percent-encoded ArcGIS query values and parse ArcGIS error and paging fields
   as JSON.
 - Invalid product combinations now fail before network access.
-
-### Deprecated
-
-- `ArcGISClient::query_active_watches()`. NOAA's WWA polygons do not contain
-  the SPC fields in `WatchPayload`; use `ArchiveClient::watches()`.
 
 ## [0.1.1] - 2026-06-06
 

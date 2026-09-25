@@ -1,16 +1,11 @@
 ## Summary
 
-<!-- 1-3 sentences. What changed and why. Link the upstream issue if any. -->
+<!-- What changed and why, in a few sentences. Link the issue if there is one. -->
 
-## Test plan
+## Testing
 
-<!-- Bullet list of how you verified the change. Include commands you ran. -->
+<!-- The commands you ran and anything you checked by hand. -->
 
-- [ ] `make lint` clean
-- [ ] `make test` passes (or specify which subset)
-- [ ] CHANGELOG.md updated under `## [Unreleased]` (if user-visible)
-- [ ] No new public API → no SemVer minor/major bump needed
-
-## Notes for reviewers
-
-<!-- Optional: anything subtle about the change, alternatives considered, follow-ups. -->
+- [ ] `make test` and `make lint` pass
+- [ ] `CHANGELOG.md` has an `[Unreleased]` entry for user-visible changes
+- [ ] Public API changes are called out above
