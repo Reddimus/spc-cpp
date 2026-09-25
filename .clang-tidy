@@ -1,8 +1,11 @@
 # Runs on the libraries when SPC_ENABLE_CLANG_TIDY=ON (the CI clang-tidy job).
+# optin.core.EnumCastOutOfRange is off because it misreads bitmask enums: it
+# flags a flag test that yields 0 inside the fast_float that Glaze bundles.
 Checks: >
   -*,
   bugprone-*,
   clang-analyzer-*,
+  -clang-analyzer-optin.core.EnumCastOutOfRange,
   concurrency-*,
   cppcoreguidelines-*,
   -cppcoreguidelines-avoid-magic-numbers,

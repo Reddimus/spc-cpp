@@ -2,34 +2,11 @@
 
 #include <cmath>
 #include <format>
+#include <glaze/util/fast_float.hpp>
 #include <limits>
 #include <stdexcept>
-#include <utility>
-
-// libc++ implements floating-point std::from_chars only from version 20 and
-// does not define __cpp_lib_to_chars, so check its version directly. Apple's
-// libc++ ships it only from macOS 26 (iOS 26), so an older deployment target
-// uses the stream fallback. Define SPC_HAS_FP_FROM_CHARS=0 on the command line
-// to test the fallback.
-#ifndef SPC_HAS_FP_FROM_CHARS
-#if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
-#define SPC_HAS_FP_FROM_CHARS 1
-#elif defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200000 &&       \
-	(!defined(_LIBCPP_AVAILABILITY_HAS_FROM_CHARS_FLOATING_POINT) || \
-	 _LIBCPP_AVAILABILITY_HAS_FROM_CHARS_FLOATING_POINT)
-#define SPC_HAS_FP_FROM_CHARS 1
-#else
-#define SPC_HAS_FP_FROM_CHARS 0
-#endif
-#endif
-
-#if SPC_HAS_FP_FROM_CHARS
-#include <charconv>
 #include <system_error>
-#else
-#include <locale>
-#include <sstream>
-#endif
+#include <utility>
 
 namespace spc::detail {
 
@@ -57,46 +34,17 @@ std::string json_string(const Json& obj, const char* key) {
 }
 
 ParsedNumber parse_double(std::string_view text) {
+	// Glaze's bundled fast_float follows std::from_chars, which libc++ lacks for
+	// floating point before version 20 and Apple ships only from macOS 26.
 	ParsedNumber parsed;
-	if (text.empty()) {
-		return parsed;
-	}
-	// Both implementations below must accept the same leading characters:
-	// '-', '.', a digit, or the start of inf/nan.
-	const char first = text.front();
-	const bool leading_ok = first == '-' || first == '.' || (first >= '0' && first <= '9') ||
-							first == 'i' || first == 'I' || first == 'n' || first == 'N';
-	if (!leading_ok) {
-		return parsed;
-	}
-
-#if SPC_HAS_FP_FROM_CHARS
-	const std::from_chars_result result =
-		std::from_chars(text.data(), text.data() + text.size(), parsed.value);
+	const glz::fast_float::from_chars_result result =
+		glz::fast_float::from_chars(text.data(), text.data() + text.size(), parsed.value);
 	if (result.ec != std::errc{}) {
 		return ParsedNumber{};
 	}
 	parsed.consumed = static_cast<std::size_t>(result.ptr - text.data());
 	parsed.ok = true;
 	return parsed;
-#else
-	std::istringstream stream{std::string{text}};
-	stream.imbue(std::locale::classic());
-	stream >> parsed.value;
-	if (stream.fail()) {
-		return ParsedNumber{};
-	}
-	// tellg() reports -1 once the whole buffer was consumed.
-	parsed.consumed = text.size();
-	if (!stream.eof()) {
-		const std::streamoff position = stream.tellg();
-		if (position >= 0) {
-			parsed.consumed = static_cast<std::size_t>(position);
-		}
-	}
-	parsed.ok = true;
-	return parsed;
-#endif
 }
 
 double json_number_or_numeric_string(const Json& obj, const char* key) {
