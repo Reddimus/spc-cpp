@@ -58,7 +58,7 @@ With FetchContent:
 include(FetchContent)
 FetchContent_Declare(spc_cpp
     GIT_REPOSITORY https://github.com/Reddimus/spc-cpp.git
-    GIT_TAG v0.3.0
+    GIT_TAG v0.4.0
 )
 FetchContent_MakeAvailable(spc_cpp)
 target_link_libraries(myapp PRIVATE spc::spc)
@@ -77,7 +77,7 @@ cmake --install build --prefix /your/prefix
 ```
 
 ```cmake
-find_package(spc 0.3 REQUIRED)
+find_package(spc 0.4 REQUIRED)
 target_link_libraries(myapp PRIVATE spc::spc)
 ```
 
