@@ -3,8 +3,9 @@
 /// IEM archive.
 ///
 /// Every method returns `Result<T>` and never throws for network or data
-/// errors. Clients are move-only. A client is safe to use from several
-/// threads when its transport is; the default `HttpClient` is.
+/// errors. Clients are move-only; a moved-from client may only be assigned
+/// to or destroyed. A client is safe to use from several threads when its
+/// transport is; the default `HttpClient` is.
 
 #pragma once
 

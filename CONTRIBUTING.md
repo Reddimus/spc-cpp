@@ -13,7 +13,7 @@ cd spc-cpp
 sudo apt install build-essential clang-format libcurl4-openssl-dev pipx
 pipx install cmake
 # macOS
-brew install cmake clang-format curl
+brew install cmake curl llvm@18   # llvm@18 provides clang-format 18
 
 make test
 make install-hooks   # optional: format and lint before each commit
@@ -55,6 +55,8 @@ make tidy CMAKE_ARGS="-DCMAKE_CXX_COMPILER=$llvm/bin/clang++ \
 ## Code style
 
 - `.clang-format` decides layout: tabs, 100 columns. `make format` applies it.
+  Use clang-format 18, as CI does; newer versions format a few constructs
+  differently (`brew install llvm@18` or `pipx install clang-format==18.1.8`).
 - Spell out types. `auto` is allowed only for iterators, structured
   bindings, and lambdas, and `tools/cpp_auto_audit.py` enforces that.
   Mark a genuine exception with `// auto-ok`.

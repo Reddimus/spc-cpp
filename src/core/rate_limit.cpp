@@ -69,7 +69,9 @@ std::optional<RateLimiter::Clock::duration> RateLimiter::take_or_wait_time() noe
 	refill();
 	if (tokens_ > 0) {
 		--tokens_;
-		++daily_requests_used_;
+		if (config_.daily_limit > 0) {
+			++daily_requests_used_;
+		}
 		return std::nullopt;
 	}
 	const Clock::duration wait = last_refill_ + config_.refill_interval - Clock::now();
@@ -117,13 +119,22 @@ bool RateLimiter::acquire_until(std::optional<Clock::time_point> deadline) {
 
 std::uint16_t RateLimiter::available_tokens() const noexcept {
 	const std::lock_guard<std::mutex> lock(mutex_);
-	return tokens_;
+	// What refill() would add now, without changing state.
+	const std::int64_t earned = (Clock::now() - last_refill_) / config_.refill_interval;
+	const std::int64_t total =
+		static_cast<std::int64_t>(tokens_) + std::max<std::int64_t>(earned, 0);
+	return static_cast<std::uint16_t>(
+		std::min<std::int64_t>(total, static_cast<std::int64_t>(config_.max_tokens)));
 }
 
 std::int32_t RateLimiter::daily_requests_remaining() const noexcept {
 	const std::lock_guard<std::mutex> lock(mutex_);
 	if (config_.daily_limit <= 0) {
 		return 0;
+	}
+	// A new UTC day resets the count even before the next acquire.
+	if (utc_day_start() > day_start_) {
+		return config_.daily_limit;
 	}
 	return config_.daily_limit - daily_requests_used_;
 }

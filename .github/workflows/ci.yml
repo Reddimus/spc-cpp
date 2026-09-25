@@ -65,16 +65,16 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Formatting is checked once, in build-linux: clang-format output
+      # differs between major versions, and Homebrew ships the newest.
       - name: Install dependencies
         run: |
-          brew install curl clang-format
+          brew install curl
           echo "CMAKE_PREFIX_PATH=$(brew --prefix curl)" >> "$GITHUB_ENV"
       - name: Build
         run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
       - name: Test
         run: make test
-      - name: Lint
-        run: make lint
 
   markdown-lint:
     runs-on: ubuntu-latest

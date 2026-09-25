@@ -290,6 +290,25 @@ TEST(ArcGISClientPaging, AdvancesTheOffsetByTheRecordsTheServerActuallyReturned)
 	EXPECT_NE(transport->requests[2].find("resultOffset=5"), std::string::npos);
 }
 
+TEST(ArcGISClientPaging, TypedQueriesMergeFeaturesFromEveryPage) {
+	const std::string feature =
+		R"({"type":"Feature","properties":{"label":"TSTM"},)"
+		R"("geometry":{"type":"Polygon","coordinates":[[[0,0],[1,0],[1,1],[0,0]]]}})";
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {
+		{200, R"({"features":[)" + feature + R"(],"exceededTransferLimit":true})", {}},
+		{200, R"({"features":[)" + feature + "," + feature + R"(]})", {}},
+	};
+	const ArcGISClient client{transport};
+
+	const Result<CategoricalOutlookPayload> result = client.query_categorical(1);
+
+	ASSERT_TRUE(result) << result.error().message;
+	EXPECT_EQ(result->features.size(), 3u);
+	ASSERT_EQ(transport->requests.size(), 2u);
+	EXPECT_NE(transport->requests[1].find("resultOffset=1"), std::string::npos);
+}
+
 TEST(ArcGISClientPaging, FailsWhenATruncatedPageCarriesNoRecords) {
 	// The offset would never move.
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
@@ -333,6 +352,23 @@ TEST(ArcGISClientPaging, ReturnsLogicalArcGISErrorsReportedWithHttp200) {
 	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
 	EXPECT_EQ(result.error().http_status, 400);
 	EXPECT_EQ(result.error().message, "Invalid or missing input parameters.");
+}
+
+TEST(ArcGISClientPaging, KeepsTheArcGISErrorDetails) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {
+		{200,
+		 R"({"error":{"code":400,"message":"Cannot perform query.",)"
+		 R"("details":["'where' parameter is invalid.","Check field names."]}})",
+		 {}},
+	};
+	const ArcGISClient client{transport};
+
+	const Result<std::vector<std::string>> result =
+		client.query_layer(ArcGISService::Outlooks, 1, {});
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().detail, "'where' parameter is invalid.; Check field names.");
 }
 
 // ===== What a 404 means =====

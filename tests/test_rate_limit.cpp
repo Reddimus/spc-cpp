@@ -127,6 +127,28 @@ TEST(RateLimit, ARefillKeepsThePartialInterval) {
 	EXPECT_TRUE(limiter.try_acquire());
 }
 
+TEST(RateLimit, AvailableTokensIncludesTokensEarnedWhileIdle) {
+	RateLimiter::Config config;
+	config.max_tokens = 3;
+	config.initial_tokens = 0;
+	config.refill_interval = milliseconds{20};
+	const RateLimiter limiter{config};
+
+	std::this_thread::sleep_for(milliseconds{70});
+
+	EXPECT_EQ(limiter.available_tokens(), 3);
+}
+
+TEST(RateLimit, NoDailyCapMeansNoDailyCount) {
+	RateLimiter::Config config;
+	config.daily_limit = 0;
+	RateLimiter limiter{config};
+
+	ASSERT_TRUE(limiter.try_acquire());
+
+	EXPECT_EQ(limiter.daily_requests_remaining(), 0);
+}
+
 TEST(RateLimit, ConcurrentCallersNeverGetMoreTokensThanTheBucketHolds) {
 	RateLimiter::Config config;
 	config.max_tokens = 5;

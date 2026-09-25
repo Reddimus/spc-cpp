@@ -37,6 +37,7 @@ public:
 	/// `acquire()` with an explicit limit on the wait.
 	[[nodiscard]] bool acquire_for(std::chrono::milliseconds max_wait);
 
+	/// Tokens available now, including any earned since the last call.
 	[[nodiscard]] std::uint16_t available_tokens() const noexcept;
 
 	/// Requests left today. Returns 0 when `daily_limit` is 0 (no cap).

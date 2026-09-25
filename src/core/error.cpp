@@ -23,9 +23,16 @@ void fill_message_from_body(Error& err, const std::string& body) {
 			if (m != eo.end() && m->second.is_string()) {
 				err.message = m->second.get<std::string>();
 			}
+			// ArcGIS sends `details` as an array of strings.
 			glz::generic::object_t::const_iterator d = eo.find("details");
 			if (d != eo.end() && d->second.is_string()) {
 				err.detail = d->second.get<std::string>();
+			} else if (d != eo.end() && d->second.is_array()) {
+				for (const glz::generic& item : d->second.get_array()) {
+					if (item.is_string()) {
+						err.detail += (err.detail.empty() ? "" : "; ") + item.get<std::string>();
+					}
+				}
 			}
 		}
 	} else {

@@ -87,6 +87,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrived more slowly than configured. A `max_tokens` of 0 made `acquire()`
   wait forever; it is now treated as 1.
 - A default-constructed `Error` left `code` uninitialized.
+- ArcGIS error `details`, sent as an array, were dropped from `Error::detail`.
+- `RateLimiter::available_tokens()` ignored tokens earned since the last
+  acquire, and `daily_requests_remaining()` ignored a new UTC day.
 - A `Retry-After` value too large for milliseconds overflowed.
 - `HttpClient::config()` on a moved-from client dereferenced null.
 
