@@ -1,9 +1,7 @@
 name: Release
 
-# Auto-publish a GitHub Release when a vX.Y.Z tag is pushed.
-# Body is the matching section of CHANGELOG.md (between the "## [X.Y.Z]"
-# heading and the next "## " heading), so tag → release stays in sync
-# without a separate manual step.
+# Pushing a vX.Y.Z tag publishes a GitHub Release whose notes are the matching
+# "## [X.Y.Z]" section of CHANGELOG.md.
 
 on:
   push:
@@ -12,61 +10,67 @@ on:
       - "v[0-9]+.[0-9]+.[0-9]+-*"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  release:
-    runs-on: ubuntu-latest
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v7.0.1
-        with:
-          fetch-depth: 0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Verify tag matches CMakeLists project VERSION
-        # Pin the source-of-truth: the tag X.Y.Z must equal the
-        # `project(spc-cpp VERSION X.Y.Z ...)` field in
-        # CMakeLists.txt. Without this guard the two can drift
-        # silently and corrupt `find_package(spc-cpp VERSION X.Y.Z)`
-        # consumer queries (the generated spc-cppConfigVersion.cmake
-        # tracks PROJECT_VERSION).
+      - name: Check the tag matches project(spc-cpp VERSION ...)
+        # find_package(spc X.Y) compares against PROJECT_VERSION, so the two
+        # must agree.
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          version="${tag#v}"
-          cmake_version=$(awk -F 'VERSION |LANGUAGES' '
-            /^project\(spc-cpp / { gsub(/[ \t]/,"",$2); print $2; exit }
-          ' CMakeLists.txt)
-          if [ "$cmake_version" != "$version" ]; then
-            echo "::error::tag $tag implies version '$version' but CMakeLists.txt says '$cmake_version'" >&2
-            echo "Bump 'project(spc-cpp VERSION ...)' to match before tagging." >&2
+          version="${GITHUB_REF_NAME#v}"
+          cmake_version=$(sed -nE 's/^project\(spc-cpp VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
+          if [ "$cmake_version" != "${version%%-*}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match CMakeLists.txt version $cmake_version"
             exit 1
           fi
-          echo "OK: tag $tag matches CMakeLists VERSION $cmake_version"
 
-      - name: Extract release notes from CHANGELOG.md
+      - name: Install dependencies
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          version="${tag#v}"
-          # Pipe directly to a file. DO NOT capture into a shell var
-          # and echo it back — bash treats backticks as command
-          # substitution, which silently strips every inline `code`
-          # span from the release body. Reading via `gh release create
-          # --notes-file` preserves the bytes verbatim.
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
+
+      - name: Build and test
+        run: make test CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
+
+      - name: Check installed and FetchContent consumers
+        run: ./tools/test_consumers.sh
+
+  release:
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Extract the release notes
+        # Write to a file: echoing the notes through the shell would run their
+        # `code` spans as command substitutions.
+        run: |
+          version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '
-            $0 ~ "^## \\["v"\\]" { capture=1; next }
+            $0 ~ "^## \\[" v "\\]" { capture = 1; next }
             capture && /^## / { exit }
+            capture && /^\[[^]]+\]: / { exit }
             capture { print }
-          ' CHANGELOG.md > /tmp/release_notes.md
-          if [ ! -s /tmp/release_notes.md ]; then
-            printf 'Release %s. See CHANGELOG.md for details.\n' "$tag" \
-              > /tmp/release_notes.md
+          ' CHANGELOG.md > "$RUNNER_TEMP/notes.md"
+          if [ ! -s "$RUNNER_TEMP/notes.md" ]; then
+            echo "::error::CHANGELOG.md has no section for $version"
+            exit 1
           fi
 
-      - name: Create GitHub Release
+      - name: Publish the release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          tag="${GITHUB_REF#refs/tags/}"
-          gh release create "$tag" \
-            --title "$tag" \
-            --notes-file /tmp/release_notes.md \
-            --verify-tag
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" \
+            --notes-file "$RUNNER_TEMP/notes.md" --verify-tag
