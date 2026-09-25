@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-09-25
+
 ### Fixed
 
 - An ArcGIS error object with code 503 was `ServerError`. It is now

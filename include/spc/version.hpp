@@ -10,7 +10,7 @@
 // NOLINTBEGIN(cppcoreguidelines-macro-to-enum,modernize-macro-to-enum,cppcoreguidelines-macro-usage)
 #define SPC_VERSION_MAJOR 0
 #define SPC_VERSION_MINOR 4
-#define SPC_VERSION_PATCH 2
+#define SPC_VERSION_PATCH 3
 
 #define SPC_VERSION_STRINGIFY_(x) #x
 #define SPC_VERSION_STRINGIFY(x) SPC_VERSION_STRINGIFY_(x)
