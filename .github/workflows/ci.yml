@@ -60,21 +60,61 @@ jobs:
       - name: Test
         run: make test
 
+  # The README build on a Mac: Apple Clang and the system libcurl. One
+  # universal binary targeting macOS 13.4 covers both architectures, and
+  # test-macos runs it on an older macOS and a real Intel Mac.
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-26
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # Formatting is checked once, in build-linux: clang-format output
-      # differs between major versions, and Homebrew ships the newest.
-      - name: Install dependencies
+      - name: Build for arm64 and x86_64, macOS 13.4 and later
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPC_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=13.4 "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+      - run: cmake --build build --parallel
+      - name: Check both slices, the minimum macOS, and the system libcurl
         run: |
-          brew install curl
-          echo "CMAKE_PREFIX_PATH=$(brew --prefix curl)" >> "$GITHUB_ENV"
-      - name: Build
-        run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
+          for f in build/src/libspc_*.a build/tests/spc_tests; do
+            lipo "$f" -verify_arch arm64 && lipo "$f" -verify_arch x86_64
+          done
+          otool -l build/tests/spc_tests | grep -q 'minos 13.4'
+          otool -L build/tests/spc_tests | grep -q /usr/lib/libcurl.4.dylib
+      - name: Test the arm64 slice
+        run: ctest --test-dir build --output-on-failure
+      - name: Test the x86_64 slice under Rosetta 2
+        run: arch -x86_64 build/tests/spc_tests
+      - name: Check installed and FetchContent consumers
+        run: ./tools/test_consumers.sh
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: macos-universal
+          path: |
+            build/tests/spc_tests
+            build/examples/example_parse_outlook
+
+  # Runs the macOS 13.4 build from build-macos on an older macOS and on a real
+  # Intel Mac. The tests read fixtures from the same absolute checkout path.
+  test-macos:
+    needs: build-macos
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-15, macos-26-intel]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: macos-universal
+          path: build
       - name: Test
-        run: make test
+        run: |
+          chmod +x build/tests/spc_tests build/examples/example_parse_outlook
+          sw_vers -productVersion && uname -m
+          build/tests/spc_tests
+          build/examples/example_parse_outlook
 
   markdown-lint:
     runs-on: ubuntu-latest

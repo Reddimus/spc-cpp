@@ -7,12 +7,16 @@
 #include <utility>
 
 // libc++ implements floating-point std::from_chars only from version 20 and
-// does not define __cpp_lib_to_chars, so check its version directly. Define
-// SPC_HAS_FP_FROM_CHARS=0 on the command line to test the stream fallback.
+// does not define __cpp_lib_to_chars, so check its version directly. Apple's
+// libc++ ships it only from macOS 26 (iOS 26), so an older deployment target
+// uses the stream fallback. Define SPC_HAS_FP_FROM_CHARS=0 on the command line
+// to test the fallback.
 #ifndef SPC_HAS_FP_FROM_CHARS
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
 #define SPC_HAS_FP_FROM_CHARS 1
-#elif defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200000
+#elif defined(_LIBCPP_VERSION) && _LIBCPP_VERSION >= 200000 &&       \
+	(!defined(_LIBCPP_AVAILABILITY_HAS_FROM_CHARS_FLOATING_POINT) || \
+	 _LIBCPP_AVAILABILITY_HAS_FROM_CHARS_FLOATING_POINT)
 #define SPC_HAS_FP_FROM_CHARS 1
 #else
 #define SPC_HAS_FP_FROM_CHARS 0
