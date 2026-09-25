@@ -1,17 +1,12 @@
 /// @file test_arcgis.cpp
-/// @brief Esri-vs-GeoJSON parity + net-new model coverage over the shared
-/// live fixture corpus.
+/// @brief Esri-vs-GeoJSON parity over the captured fixtures, and the product
+/// parsers.
 ///
-/// The parity claim that gates the ArcGIS path: for the SAME SPC layer, the
-/// Esri `f=json` (rings) and GeoJSON `f=geojson` (coordinates) responses must
-/// describe the SAME outlook polygons — so the verbatim categorical parser
-/// (GeoJSON) and an Esri-fed parse must agree on feature count, labels, and
-/// point-in-polygon membership. `parse_esri_rings` is deliberately a
-/// separate function from the verbatim `parse_rings`; this test is what
-/// proves the separation didn't introduce a discrepancy.
+/// ArcGIS serves the same layer as Esri rings (f=json) and GeoJSON
+/// (f=geojson). `parse_esri_rings` must describe the same areas as the
+/// spc-data GeoJSON walker, so these tests compare point membership.
 
 #include "spc/geometry.hpp"
-#include "spc/models/common.hpp"
 #include "spc/models/convective.hpp"
 #include "spc/models/fire_weather.hpp"
 #include "spc/models/mesoscale.hpp"
@@ -19,28 +14,25 @@
 #include "spc/models/storm_report.hpp"
 #include "spc/models/watch.hpp"
 
+#include <algorithm>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <filesystem>
 #include <format>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <sstream>
+#include <limits>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "models/json.hpp"
+#include "support/fixtures.hpp"
+
 namespace {
 
 using namespace spc;
-
-std::string slurp(const std::string& name) {
-	std::ifstream f(std::filesystem::path(SPC_FIXTURES_DIR) / name, std::ios::binary);
-	EXPECT_TRUE(f.is_open()) << "missing fixture: " << name;
-	std::stringstream buf;
-	buf << f.rdbuf();
-	return buf.str();
-}
+using detail::Json;
+using test::read_fixture;
 
 // Even-odd union membership (hole-correct).
 bool inside_any(double lon, double lat, const std::vector<Polygon>& rings) {
@@ -53,9 +45,7 @@ bool inside_any(double lon, double lat, const std::vector<Polygon>& rings) {
 	return in;
 }
 
-// Minimum distance from a point to any ring edge (degrees). Used to skip
-// probes that sit in the ~1 m boundary band where the comparison is
-// ill-posed (see note in the test below).
+// Distance in degrees from a point to the nearest ring edge.
 double dist_to_boundary(double px, double py, const std::vector<Polygon>& rings) {
 	double best = 1e18;
 	for (const Polygon& r : rings) {
@@ -81,27 +71,18 @@ double dist_to_boundary(double px, double py, const std::vector<Polygon>& rings)
 	return best;
 }
 
-// Esri-vs-GeoJSON parity (the risk-#8 gate).
-//
-// IMPORTANT empirical fact this test encodes: ArcGIS does NOT emit
-// bit-identical geometry for `f=json` (Esri rings) vs `f=geojson` — the two
-// formats are independently quantized/densified and differ by up to ~1.3 m
-// (~1.2e-5 deg), with different vertex sequences. So strict ring- or
-// boundary-coincident equality is impossible by construction. The
-// operationally correct parity claim — and what consumers actually rely on —
-// is that **point-in-polygon membership agrees** for any point not pathologi-
-// cally close to the (format-dependent, ~1 m fuzzy) boundary. We assert that
-// over a dense grid: every probe that is unambiguously interior/exterior to
-// BOTH ring sets (>~5 m clear of either boundary) must classify identically.
-// A real divergence (e.g. dropped band, kept hole, wrong winding) flips whole
-// regions and fails this; the ~1 m source quantization does not.
+// ArcGIS quantizes the two formats separately, so their vertices differ by up
+// to ~1.3 m and exact ring equality is impossible. Membership is what callers
+// rely on: every grid point more than ~5 m from either boundary must
+// classify the same way. A dropped band, a kept hole, or a wrong winding
+// flips whole regions and fails this.
 TEST(ArcGISParity, EsriRingsMatchGeoJsonForDay1Categorical) {
 	const CategoricalOutlookPayload gj =
-		parse_categorical(slurp("arcgis_day1_categorical.geojson"), 1);
+		parse_categorical(read_fixture("arcgis_day1_categorical.geojson"), 1);
 	ASSERT_GT(gj.features.size(), 0u);
 
 	const glz::expected<Json, std::string> root =
-		detail::parse_root(slurp("arcgis_day1_categorical.esri.json"));
+		detail::parse_root(read_fixture("arcgis_day1_categorical.esri.json"));
 	ASSERT_TRUE(root.has_value());
 	const Json* feats = detail::lookup(*root, "features");
 	ASSERT_NE(feats, nullptr);
@@ -180,14 +161,11 @@ TEST(ArcGISParity, EsriRingsMatchGeoJsonForDay1Categorical) {
 	EXPECT_GT(probe_compared, 100u) << "too few clear-of-boundary probes to be meaningful";
 	EXPECT_EQ(probe_agree, probe_compared)
 		<< "Esri vs GeoJSON disagreed on " << (probe_compared - probe_agree) << "/"
-		<< probe_compared
-		<< " unambiguous interior/exterior probes — parse_esri_rings "
-		   "genuinely diverged from the verbatim GeoJSON path (not source quantization)";
+		<< probe_compared << " probes clear of the boundary";
 }
 
 // Grid-probe membership agreement between two ring sets, on the same terms as
-// the day-1 categorical gate above: probes within ~5 m of either boundary are
-// skipped, everything else must classify identically.
+// the day 1 categorical test above.
 struct MembershipProbe {
 	std::size_t compared = 0;
 	std::size_t agreed = 0;
@@ -232,10 +210,6 @@ void probe_membership(const std::vector<Polygon>& reference, const std::vector<P
 	}
 }
 
-// Every captured Esri/GeoJSON fixture pair, not just the day-1 categorical
-// one. The probabilistic pairs previously had no reader at all: the test named
-// for Esri-vs-GeoJSON probabilistic parity only ever opened the GeoJSON side,
-// so parse_esri_rings' hole-dropping rule was pinned by one categorical layer.
 TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
 	struct Pair {
 		std::string stem;
@@ -250,29 +224,28 @@ TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
 	};
 
 	for (const Pair& pair : pairs) {
-		// Label -> rings, from the verbatim GeoJSON walker.
+		// Label -> rings, from the GeoJSON walker.
 		std::vector<std::pair<std::string, std::vector<Polygon>>> reference;
 		if (pair.hazard.empty()) {
 			const CategoricalOutlookPayload gj =
-				parse_categorical(slurp(pair.stem + ".geojson"), pair.day);
+				parse_categorical(read_fixture(pair.stem + ".geojson"), pair.day);
 			for (const OutlookFeature& f : gj.features) {
 				reference.emplace_back(f.label, f.rings);
 			}
 		} else {
 			const ProbOutlookPayload gj =
-				parse_probabilistic(slurp(pair.stem + ".geojson"), pair.day, pair.hazard);
+				parse_probabilistic(read_fixture(pair.stem + ".geojson"), pair.day, pair.hazard);
 			for (const ProbOutlookFeature& f : gj.features) {
 				EXPECT_GT(f.probability, 0.0) << pair.stem;
 				EXPECT_LT(f.probability, 1.0) << pair.stem;
-				// ProbOutlookFeature keeps no label; the isopleth value is the
-				// band identity, and both sides derive it from the same string.
+				// Isopleths have no label; the probability identifies the band.
 				reference.emplace_back(std::format("{:.6f}", f.probability), f.rings);
 			}
 		}
 		ASSERT_GT(reference.size(), 0u) << pair.stem;
 
 		const glz::expected<Json, std::string> root =
-			detail::parse_root(slurp(pair.stem + ".esri.json"));
+			detail::parse_root(read_fixture(pair.stem + ".esri.json"));
 		ASSERT_TRUE(root.has_value()) << pair.stem;
 		const Json* feats = detail::lookup(*root, "features");
 		ASSERT_NE(feats, nullptr) << pair.stem;
@@ -314,8 +287,8 @@ TEST(ArcGISParity, EveryCapturedEsriFixtureMatchesItsGeoJsonTwin) {
 	}
 }
 
-TEST(NetNewModels, Day48ParsesStaticGeoJson) {
-	const Day48OutlookPayload p = parse_day4_8(slurp("day4prob.nolyr.geojson"), 4);
+TEST(Models, Day48ParsesStaticGeoJson) {
+	const Day48OutlookPayload p = parse_day4_8(read_fixture("day4prob.nolyr.geojson"), 4);
 	EXPECT_EQ(p.day, 4);
 	ASSERT_GT(p.features.size(), 0u);
 	for (const Day48Feature& f : p.features) {
@@ -326,35 +299,35 @@ TEST(NetNewModels, Day48ParsesStaticGeoJson) {
 	}
 }
 
-TEST(NetNewModels, Day48ParsesNonemptySyntheticArcGisResponse) {
+TEST(Models, Day48ParsesNonemptySyntheticArcGisResponse) {
 	const Day48OutlookPayload payload =
-		parse_day4_8(slurp("arcgis_day4_8_nonempty.synthetic.json"), 4);
+		parse_day4_8(read_fixture("arcgis_day4_8_nonempty.synthetic.json"), 4);
 	ASSERT_EQ(payload.features.size(), 1u);
 	EXPECT_EQ(payload.features[0].day, 4);
 	EXPECT_DOUBLE_EQ(payload.features[0].probability, 0.15);
 	EXPECT_FALSE(payload.features[0].rings.empty());
 }
 
-TEST(NetNewModels, ConditionalIntensityCigMapper) {
+TEST(Models, ConditionalIntensityCigMapper) {
 	EXPECT_EQ(cig_severity_from_label("CIG1"), 1);
 	EXPECT_EQ(cig_severity_from_label("CIG2"), 2);
 	EXPECT_EQ(cig_severity_from_label("CIG3"), 3);
 	EXPECT_EQ(cig_severity_from_label("SLGT"), 0); // NOT the categorical scale
 	const ConditionalIntensityPayload p = parse_conditional_intensity(
-		slurp("arcgis_day1_torn_conditional_intensity.esri.json"), 1, "tornado");
+		read_fixture("arcgis_day1_torn_conditional_intensity.esri.json"), 1, "tornado");
 	ASSERT_GT(p.features.size(), 0u);
 	EXPECT_EQ(p.features[0].label, "CIG1");
 	EXPECT_EQ(p.features[0].cig_level, 1);
 	EXPECT_FALSE(p.features[0].rings.empty());
 }
 
-TEST(NetNewModels, FireWeatherOwnSeverityMapper) {
+TEST(Models, FireWeatherOwnSeverityMapper) {
 	EXPECT_EQ(fire_severity_from_label("ELEV"), 1);
 	EXPECT_EQ(fire_severity_from_label("CRIT"), 2);
 	EXPECT_EQ(fire_severity_from_label("EXTM"), 3);
 	EXPECT_EQ(fire_severity_from_label("SLGT"), 0); // not categorical
-	const FireWeatherPayload p = parse_fire_weather(slurp("arcgis_day1_fire_weather.esri.json"), 1,
-													FireWeatherLayer::Outlook);
+	const FireWeatherPayload p = parse_fire_weather(
+		read_fixture("arcgis_day1_fire_weather.esri.json"), 1, FireWeatherLayer::Outlook);
 	EXPECT_EQ(p.day, 1);
 	ASSERT_EQ(p.features.size(), 3u);
 	EXPECT_EQ(p.features[0].label, "ELEV");
@@ -368,14 +341,12 @@ TEST(NetNewModels, FireWeatherOwnSeverityMapper) {
 	}
 }
 
-TEST(NetNewModels, FireWeatherLayerIsTheOnlyThingThatDisambiguatesDayOneAndTwoDn) {
-	// The captured day-1 and day-2 payloads carry no LABEL at all, only the
-	// numeric dn band index (5/8/10) that the Outlook and DryThunderstorm
-	// layers both use with different meanings. Nothing in the body says which
-	// layer it came from, so the caller must say — there is no safe default.
+TEST(Models, FireWeatherLayerIsTheOnlyThingThatDisambiguatesDayOneAndTwoDn) {
+	// Days 1 and 2 carry only dn (5/8/10), which both layers use with
+	// different meanings, so the caller has to name the layer.
 	for (const std::string& name : {std::string{"arcgis_day1_fire_weather.esri.json"},
 									std::string{"arcgis_day2_fire_weather.esri.json"}}) {
-		const std::string body = slurp(name);
+		const std::string body = read_fixture(name);
 		EXPECT_EQ(body.find("LABEL"), std::string::npos) << name;
 		EXPECT_EQ(body.find("\"label\""), std::string::npos) << name;
 
@@ -401,7 +372,7 @@ TEST(NetNewModels, FireWeatherLayerIsTheOnlyThingThatDisambiguatesDayOneAndTwoDn
 	}
 }
 
-TEST(NetNewModels, FireWeatherDryThunderstormCodesUseTheirOwnLabels) {
+TEST(Models, FireWeatherDryThunderstormCodesUseTheirOwnLabels) {
 	const std::string body = R"({"features":[
 		{"attributes":{"dn":5},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
 		{"attributes":{"dn":8},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}}
@@ -417,7 +388,7 @@ TEST(NetNewModels, FireWeatherDryThunderstormCodesUseTheirOwnLabels) {
 	EXPECT_EQ(payload.features[1].severity, 0);
 }
 
-TEST(NetNewModels, FireWeatherOmitsNoRiskSentinelPolygons) {
+TEST(Models, FireWeatherOmitsNoRiskSentinelPolygons) {
 	const std::string body = R"({"features":[
 		{"attributes":{"dn":0},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
 		{"attributes":{"LABEL":"Probability Too Low"},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}},
@@ -433,7 +404,7 @@ TEST(NetNewModels, FireWeatherOmitsNoRiskSentinelPolygons) {
 	EXPECT_EQ(payload.features[0].severity, 0);
 }
 
-TEST(NetNewModels, ExtendedFireWeatherNormalizesPublishedProbabilities) {
+TEST(Models, ExtendedFireWeatherNormalizesPublishedProbabilities) {
 	const std::string body = R"({"features":[
 		{"attributes":{"label":"0.40","dn":40},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}},
 		{"attributes":{"dn":"15"},"geometry":{"rings":[[[2,1],[3,1],[3,0],[2,0],[2,1]]]}},
@@ -453,34 +424,69 @@ TEST(NetNewModels, ExtendedFireWeatherNormalizesPublishedProbabilities) {
 	EXPECT_EQ(payload.features[1].severity, 0);
 }
 
-TEST(NetNewModels, MesoscaleRawTextOnly) {
+TEST(Models, MesoscaleRawTextOnly) {
 	const MesoscalePayload p =
-		parse_mesoscale_discussions(slurp("arcgis_mesoscale_discussion.esri.json"));
+		parse_mesoscale_discussions(read_fixture("arcgis_mesoscale_discussion.esri.json"));
 	ASSERT_GT(p.discussions.size(), 0u);
 	EXPECT_FALSE(p.discussions[0].name.empty());
-	// URL captured raw; narrative deliberately not parsed (no body field).
 	EXPECT_NE(p.discussions[0].url.find("spc.noaa.gov"), std::string::npos);
 	EXPECT_FALSE(p.discussions[0].rings.empty());
 }
 
-TEST(NetNewModels, WatchParsesIemGeoJson) {
-	const WatchPayload p = parse_watches(slurp("iem_spc_watch.json"));
+TEST(Models, MesoscaleSkipsTheNoAreaPlaceholder) {
+	// Captured live with no active discussion: one "NoArea" feature with a
+	// tiny ring and null links.
+	const std::string body = read_fixture("arcgis_mesoscale_discussion_noarea.esri.json");
+	ASSERT_NE(body.find("NoArea"), std::string::npos);
+
+	const MesoscalePayload p = parse_mesoscale_discussions(body);
+
+	EXPECT_TRUE(p.discussions.empty());
+}
+
+TEST(Models, WatchParsesIemGeoJson) {
+	const WatchPayload p = parse_watches(read_fixture("iem_spc_watch.json"));
 	ASSERT_GT(p.watches.size(), 0u);
 	EXPECT_EQ(p.watches[0].type, "TOR");
 	EXPECT_EQ(p.watches[0].number, 139);
+	EXPECT_EQ(p.watches[0].year, 2024);
+	EXPECT_EQ(p.watches[0].issued_at, "2024-04-26T15:10:00Z");
 	EXPECT_GT(p.watches[0].max_hail_size, 0.0);
 	EXPECT_FALSE(p.watches[0].rings.empty());
 }
 
-TEST(NetNewModels, StormReportsParseIemLsr) {
-	const StormReportPayload p = parse_storm_reports(slurp("iem_storm_reports.json"));
+TEST(Models, WatchNumbersThatAreNotFiniteIntegersBecomeZero) {
+	// A plain cast of inf or 1e300 to int32 is undefined behavior.
+	const WatchPayload p = parse_watches(R"({"features":[
+		{"properties":{"number":"inf","year":1e300}},
+		{"properties":{"number":"nan","year":-5e20}}
+	]})");
+	ASSERT_EQ(p.watches.size(), 2u);
+	for (const Watch& w : p.watches) {
+		EXPECT_EQ(w.number, 0);
+		EXPECT_EQ(w.year, 0);
+	}
+}
+
+TEST(Models, StormReportsParseIemLsr) {
+	const StormReportPayload p = parse_storm_reports(read_fixture("iem_storm_reports.json"));
 	ASSERT_GT(p.reports.size(), 0u);
 	for (std::size_t i = 0; i < 5 && i < p.reports.size(); ++i) {
 		const StormReport& sr = p.reports[i];
 		EXPECT_FALSE(sr.type_text.empty());
 		EXPECT_NE(sr.location.lon, 0.0);
 		EXPECT_NE(sr.location.lat, 0.0);
+		EXPECT_EQ(sr.wfo.size(), 3u);
 	}
+}
+
+TEST(JsonHelpers, ToInt32RejectsValuesACastCouldNotRepresent) {
+	EXPECT_EQ(detail::to_int32(139.0), 139);
+	EXPECT_EQ(detail::to_int32(-7.9), -7);
+	EXPECT_EQ(detail::to_int32(std::numeric_limits<double>::infinity()), std::nullopt);
+	EXPECT_EQ(detail::to_int32(std::numeric_limits<double>::quiet_NaN()), std::nullopt);
+	EXPECT_EQ(detail::to_int32(3e9), std::nullopt);
+	EXPECT_EQ(detail::to_int32(-3e9), std::nullopt);
 }
 
 TEST(EsriRings, OrientationHelper) {

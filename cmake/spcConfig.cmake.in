@@ -1,6 +1,8 @@
 @PACKAGE_INIT@
 
 include(CMakeFindDependencyMacro)
-find_dependency(CURL)
+find_dependency(CURL 7.85)
 
 include("${CMAKE_CURRENT_LIST_DIR}/spcTargets.cmake")
+
+check_required_components(spc)

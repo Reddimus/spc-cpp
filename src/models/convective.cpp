@@ -1,63 +1,18 @@
 /// @file convective.cpp
-/// @brief Net-new Day 4-8 + conditional-intensity parsers.
-///
-/// Independent of the verbatim Day1-3 path. Reuses only the shared null-safe
-/// `detail::*` helpers (which are themselves verbatim) and the net-new
-/// `detail::parse_esri_rings`; does NOT reuse `severity_from_label`.
+/// @brief Day 4-8 and conditional-intensity parsers. Each reads both the
+/// GeoJSON and the Esri response shape.
 
 #include "spc/models/convective.hpp"
 
-#include "spc/models/common.hpp"
-
-#include <stdexcept>
 #include <utility>
+
+#include "models/json.hpp"
 
 namespace spc {
 
-namespace {
-
-Json parse_root_or_throw(std::string_view body) {
-	glz::expected<Json, std::string> root = detail::parse_root(body);
-	if (!root) {
-		throw std::runtime_error(root.error());
-	}
-	return std::move(*root);
-}
-
-/// SPC's ArcGIS responses carry geometry as Esri `rings`; the static
-/// www.spc.noaa.gov GeoJSON carries `coordinates`. Pick the right walker so
-/// one parse path serves both sources without touching the verbatim
-/// GeoJSON-only `parse_rings`.
-std::vector<Polygon> rings_any(const Json& geometry) {
-	if (detail::lookup(geometry, "rings") != nullptr) {
-		return detail::parse_esri_rings(geometry);
-	}
-	return detail::parse_rings(geometry);
-}
-
-/// ArcGIS Esri features wrap fields in `attributes`; GeoJSON in
-/// `properties`. Return whichever is present.
-const Json* props_of(const Json& feat) {
-	const Json* p = detail::lookup(feat, "properties");
-	if (p != nullptr) {
-		return p;
-	}
-	return detail::lookup(feat, "attributes");
-}
-
-std::string ts_any(const Json& props, const char* upper, const char* lower) {
-	std::string v = detail::as_spc_ts(props, upper);
-	if (v.empty()) {
-		v = detail::as_spc_ts(props, lower);
-	}
-	return v;
-}
-
-} // namespace
+using detail::Json;
 
 std::uint8_t cig_severity_from_label(std::string_view label) noexcept {
-	// Product-specific: SPC conditional-intensity groups are "CIG1".."CIG3".
-	// Deliberately NOT the categorical MRGL/SLGT/... scale.
 	if (label == "CIG1") {
 		return 1;
 	}
@@ -71,31 +26,27 @@ std::uint8_t cig_severity_from_label(std::string_view label) noexcept {
 }
 
 Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
-	const Json root = parse_root_or_throw(body);
+	const Json root = detail::parse_root_or_throw(body);
 	Day48OutlookPayload payload;
 	payload.day = day;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	for (const glz::generic& feat : features_node->get_array()) {
-		const Json* props = props_of(feat);
+	for (const Json& feat : features_node->get_array()) {
+		const Json* props = detail::feature_fields(feat);
 		const Json* geometry = detail::lookup(feat, "geometry");
 		if (props == nullptr || geometry == nullptr) {
 			continue;
 		}
 		Day48Feature f;
 		f.day = day;
-		// Day4-8 publishes the percentage as LABEL ("0.15") or dn (15).
-		f.label = detail::json_string(*props, "LABEL");
-		if (f.label.empty()) {
-			f.label = detail::json_string(*props, "label");
-		}
+		f.label = detail::first_string(*props, {"LABEL", "label"});
 		f.probability = detail::normalized_probability(*props);
-		f.issued_at = ts_any(*props, "ISSUE", "issue");
-		f.valid_from = ts_any(*props, "VALID", "valid");
-		f.valid_until = ts_any(*props, "EXPIRE", "expire");
-		f.rings = rings_any(*geometry);
+		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
+		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});
+		f.valid_until = detail::first_timestamp(*props, {"EXPIRE", "expire"});
+		f.rings = detail::feature_rings(*geometry);
 		if (f.probability > 0.0 && !f.rings.empty()) {
 			payload.features.push_back(std::move(f));
 		}
@@ -105,7 +56,7 @@ Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
 
 ConditionalIntensityPayload parse_conditional_intensity(std::string_view body, std::int32_t day,
 														std::string hazard) {
-	const Json root = parse_root_or_throw(body);
+	const Json root = detail::parse_root_or_throw(body);
 	ConditionalIntensityPayload payload;
 	payload.day = day;
 	payload.hazard = std::move(hazard);
@@ -113,22 +64,19 @@ ConditionalIntensityPayload parse_conditional_intensity(std::string_view body, s
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	for (const glz::generic& feat : features_node->get_array()) {
-		const Json* props = props_of(feat);
+	for (const Json& feat : features_node->get_array()) {
+		const Json* props = detail::feature_fields(feat);
 		const Json* geometry = detail::lookup(feat, "geometry");
 		if (props == nullptr || geometry == nullptr) {
 			continue;
 		}
 		ConditionalIntensityFeature f;
-		f.label = detail::json_string(*props, "LABEL");
-		if (f.label.empty()) {
-			f.label = detail::json_string(*props, "label");
-		}
+		f.label = detail::first_string(*props, {"LABEL", "label"});
 		f.cig_level = cig_severity_from_label(f.label);
-		f.issued_at = ts_any(*props, "ISSUE", "issue");
-		f.valid_from = ts_any(*props, "VALID", "valid");
-		f.valid_until = ts_any(*props, "EXPIRE", "expire");
-		f.rings = rings_any(*geometry);
+		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
+		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});
+		f.valid_until = detail::first_timestamp(*props, {"EXPIRE", "expire"});
+		f.rings = detail::feature_rings(*geometry);
 		if (!f.rings.empty()) {
 			payload.features.push_back(std::move(f));
 		}

@@ -1,77 +1,81 @@
 /// @file test_locale.cpp
-/// @brief SPC publishes probabilities as numeric strings ("0.15"). Decoding
-/// them must not depend on the host application's LC_NUMERIC: a host that
-/// calls setlocale(LC_ALL, "") on a comma-decimal desktop (as Qt/GTK apps do)
-/// would otherwise get a successful but silently empty outlook.
+/// @brief Results must not depend on the host's C locale. Apps that call
+/// setlocale(LC_ALL, "") (most Qt and GTK apps) get the user's locale, which
+/// may use a decimal comma or treat bytes above 0x7F as letters.
 
+#include "spc/api.hpp"
 #include "spc/models/convective.hpp"
 #include "spc/models/fire_weather.hpp"
 #include "spc/models/outlook.hpp"
 
 #include <clocale>
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <sstream>
+#include <memory>
 #include <string>
+#include <string_view>
+#include <vector>
+
+#include "support/fixtures.hpp"
 
 namespace {
 
 using namespace spc;
-
-std::string slurp(const std::string& name) {
-	std::ifstream f(std::filesystem::path(SPC_FIXTURES_DIR) / name, std::ios::binary);
-	EXPECT_TRUE(f.is_open()) << "missing fixture: " << name;
-	std::stringstream buf;
-	buf << f.rdbuf();
-	return buf.str();
-}
+using test::read_fixture;
 
 /// setlocale is process-global, so restore it on every exit path.
-class ScopedNumericLocale {
+class ScopedLocale {
 public:
-	explicit ScopedNumericLocale(const char* name) {
-		const char* previous = std::setlocale(LC_NUMERIC, nullptr);
+	ScopedLocale(int category, const char* name) : category_(category) {
+		const char* previous = std::setlocale(category_, nullptr);
 		saved_ = previous != nullptr ? previous : "C";
-		applied_ = std::setlocale(LC_NUMERIC, name) != nullptr;
+		applied_ = std::setlocale(category_, name) != nullptr;
 	}
-	~ScopedNumericLocale() { (void)std::setlocale(LC_NUMERIC, saved_.c_str()); }
-	ScopedNumericLocale(const ScopedNumericLocale&) = delete;
-	ScopedNumericLocale& operator=(const ScopedNumericLocale&) = delete;
-	ScopedNumericLocale(ScopedNumericLocale&&) = delete;
-	ScopedNumericLocale& operator=(ScopedNumericLocale&&) = delete;
+	~ScopedLocale() { (void)std::setlocale(category_, saved_.c_str()); }
+	ScopedLocale(const ScopedLocale&) = delete;
+	ScopedLocale& operator=(const ScopedLocale&) = delete;
+	ScopedLocale(ScopedLocale&&) = delete;
+	ScopedLocale& operator=(ScopedLocale&&) = delete;
 
 	[[nodiscard]] bool applied() const noexcept { return applied_; }
 
 private:
+	int category_;
 	std::string saved_;
 	bool applied_{false};
 };
 
+class RecordingTransport final : public HttpTransport {
+public:
+	mutable std::vector<std::string> requests;
+
+	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override {
+		requests.emplace_back(path);
+		return HttpResponse{200, R"({"features":[]})", {}};
+	}
+};
+
 TEST(LocaleIndependence, Day48StaticFeedKeepsItsProbabilityUnderACommaDecimalLocale) {
-	// The live Day 4-8 feed carries exactly one probability field and it is a
-	// string: {"DN": 15, "LABEL": "0.15"}. Under a comma-decimal locale
-	// strtod("0.15") consumes only "0", so the feature was dropped by the
-	// probability > 0.0 gate and the whole product came back empty.
-	const ScopedNumericLocale locale{"de_DE.UTF-8"};
+	// The Day 4-8 feed's only probability is the string "0.15"; a
+	// comma-decimal strtod reads it as 0 and the feature is dropped.
+	const ScopedLocale locale{LC_NUMERIC, "de_DE.UTF-8"};
 	if (!locale.applied()) {
 		GTEST_SKIP() << "de_DE.UTF-8 is not installed on this host";
 	}
 
-	const Day48OutlookPayload payload = parse_day4_8(slurp("day4prob.nolyr.geojson"), 4);
+	const Day48OutlookPayload payload = parse_day4_8(read_fixture("day4prob.nolyr.geojson"), 4);
 
 	ASSERT_EQ(payload.features.size(), 1u);
 	EXPECT_DOUBLE_EQ(payload.features[0].probability, 0.15);
 }
 
 TEST(LocaleIndependence, ProbabilisticOutlookKeepsItsIsoplethsUnderACommaDecimalLocale) {
-	const ScopedNumericLocale locale{"de_DE.UTF-8"};
+	const ScopedLocale locale{LC_NUMERIC, "de_DE.UTF-8"};
 	if (!locale.applied()) {
 		GTEST_SKIP() << "de_DE.UTF-8 is not installed on this host";
 	}
 
 	const ProbOutlookPayload payload =
-		parse_probabilistic(slurp("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
+		parse_probabilistic(read_fixture("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
 
 	ASSERT_GT(payload.features.size(), 0u);
 	for (const ProbOutlookFeature& f : payload.features) {
@@ -81,10 +85,9 @@ TEST(LocaleIndependence, ProbabilisticOutlookKeepsItsIsoplethsUnderACommaDecimal
 }
 
 TEST(LocaleIndependence, FireWeatherNoRiskSentinelIsStillDroppedUnderACommaDecimalLocale) {
-	// has_zero_dn requires the whole string to parse; a comma-decimal strtod
-	// stops at the '.' of "0.0", the full-consume check fails, and the no-risk
-	// sentinel polygon ships as a real band.
-	const ScopedNumericLocale locale{"de_DE.UTF-8"};
+	// A comma-decimal strtod stops at the '.' of "0.0", so the no-risk polygon
+	// would ship as a real band.
+	const ScopedLocale locale{LC_NUMERIC, "de_DE.UTF-8"};
 	if (!locale.applied()) {
 		GTEST_SKIP() << "de_DE.UTF-8 is not installed on this host";
 	}
@@ -98,6 +101,23 @@ TEST(LocaleIndependence, FireWeatherNoRiskSentinelIsStillDroppedUnderACommaDecim
 
 	ASSERT_EQ(payload.features.size(), 1u);
 	EXPECT_EQ(payload.features[0].label, "IDRT");
+}
+
+TEST(LocaleIndependence, QueryValuesArePercentEncodedUnderAUtf8Locale) {
+	// macOS's isalnum() accepts bytes above 0x7F in UTF-8 locales, which left
+	// them unencoded in the URL.
+	const ScopedLocale locale{LC_CTYPE, "de_DE.UTF-8"};
+	if (!locale.applied()) {
+		GTEST_SKIP() << "de_DE.UTF-8 is not installed on this host";
+	}
+	const std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	const ArchiveClient client{transport};
+
+	ASSERT_TRUE(client.storm_reports("2026-05-19T12:00Z", "2026-05-20T12:00Z", "\xC3\xA4"));
+
+	ASSERT_EQ(transport->requests.size(), 1u);
+	EXPECT_NE(transport->requests[0].find("&wfos=%C3%A4"), std::string::npos)
+		<< transport->requests[0];
 }
 
 } // namespace

@@ -1,11 +1,32 @@
+# Runs on the libraries when SPC_ENABLE_CLANG_TIDY=ON (the CI clang-tidy job).
 Checks: >
   -*,
   bugprone-*,
+  clang-analyzer-*,
+  concurrency-*,
+  cppcoreguidelines-*,
+  -cppcoreguidelines-avoid-magic-numbers,
+  -cppcoreguidelines-macro-usage,
+  -cppcoreguidelines-pro-bounds-*,
+  -cppcoreguidelines-pro-type-vararg,
+  -cppcoreguidelines-non-private-member-variables-in-classes,
+  misc-*,
+  -misc-include-cleaner,
+  -misc-non-private-member-variables-in-classes,
+  -misc-no-recursion,
+  modernize-*,
+  -modernize-use-auto,
+  -modernize-use-trailing-return-type,
   performance-*,
   -performance-enum-size,
   portability-*,
-  modernize-use-nullptr,
-  modernize-use-override
+  readability-*,
+  -readability-function-cognitive-complexity,
+  -readability-identifier-length,
+  -readability-implicit-bool-conversion,
+  -readability-isolate-declaration,
+  -readability-magic-numbers,
+  -readability-uppercase-literal-suffix
 WarningsAsErrors: '*'
-HeaderFilterRegex: '^(include|src)/spc/|/spc-cpp/(include|src)/'
+HeaderFilterRegex: '.*/(include/spc|src)/'
 FormatStyle: file

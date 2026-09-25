@@ -1,10 +1,6 @@
-/// @file geometry.cpp
-///
-/// EXTRACTED VERBATIM from spc-data/src/geometry.cpp (Workstream C); only
-/// the namespace changed (`predictioncast::spc_data` -> `spc`). The ray-cast
-/// algorithm is byte-for-byte the spc-data implementation.
-
 #include "spc/geometry.hpp"
+
+#include <cstddef>
 
 namespace spc {
 
@@ -23,24 +19,6 @@ bool point_in_polygon(double lon, double lat, const Polygon& poly) noexcept {
 		}
 	}
 	return inside;
-}
-
-bool point_in_feature(double lon, double lat, const OutlookFeature& f) noexcept {
-	for (const Polygon& ring : f.rings) {
-		if (point_in_polygon(lon, lat, ring)) {
-			return true;
-		}
-	}
-	return false;
-}
-
-bool point_in_feature(double lon, double lat, const ProbOutlookFeature& f) noexcept {
-	for (const Polygon& ring : f.rings) {
-		if (point_in_polygon(lon, lat, ring)) {
-			return true;
-		}
-	}
-	return false;
 }
 
 } // namespace spc

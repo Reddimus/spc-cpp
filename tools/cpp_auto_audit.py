@@ -1,19 +1,10 @@
 #!/usr/bin/env python3
-"""Audit repo-owned C++ sources for disallowed local ``auto`` usage.
+"""Fail when C++ sources use `auto` outside the allowed cases.
 
-Policy:
-- allow ``auto`` for structured bindings
-- allow ``auto`` for lambda closure objects
-- allow ``auto`` for iterator-like values
-- allow explicit one-off exceptions marked with ``auto-ok``
-
-Everything else is expected to spell out the type directly. Repos can
-carry a local allowlist while older files are being burned down. The
-allowlist format is one rule per line:
-
-    relative/path.cpp|line snippet
-
-The snippet is matched as a substring against the stripped source line.
+Allowed: structured bindings, lambda objects, iterator-like values, and any
+line marked `auto-ok`. Everything else spells out its type. The allowlist file
+takes one `relative/path.cpp|line snippet` rule per line, matched as a
+substring of the stripped source line.
 """
 
 from __future__ import annotations
@@ -77,13 +68,7 @@ class Violation:
 
 
 def tracked_cpp_files(repo_root: Path) -> list[Path]:
-    # ``git ls-files`` returns tracked files only — a brand-new
-    # untracked test file is invisible to local audit but still
-    # caught by CI once it's committed, which makes the divergence
-    # surface as a CI fail after the developer thought they ran
-    # lint clean. Also include ``--others --exclude-standard`` so
-    # untracked-but-not-ignored files (typical for fresh test files)
-    # get audited too.
+    # Include untracked files so a new file fails locally, not first in CI.
     proc = subprocess.run(
         ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
         cwd=repo_root,
@@ -187,8 +172,8 @@ def parse_args() -> argparse.Namespace:
 def write_allowlist(path: Path, violations: list[Violation]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     lines = [
-        "# Repo-owned exceptions for the explicit local-type policy.",
-        "# Format: relative/path.cpp|line snippet",
+        "# Exceptions to the explicit-type rule, one per line:",
+        "# relative/path.cpp|line snippet",
     ]
     for violation in violations:
         lines.append(f"{violation.relative_path}|{violation.line.strip()}")

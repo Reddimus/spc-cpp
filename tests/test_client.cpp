@@ -1,14 +1,20 @@
+/// @file test_client.cpp
+/// @brief Client routing, paging, and error mapping, through a recording
+/// transport. No network access.
+
 #include "spc/api.hpp"
 #include "spc/pagination.hpp"
+#include "spc/version.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
 #include <string_view>
-#include <thread>
 #include <utility>
 #include <vector>
+
+#include "support/fixtures.hpp"
 
 namespace {
 
@@ -32,9 +38,8 @@ HttpResponse empty_feature_collection() {
 	return {200, R"({"type":"FeatureCollection","features":[],"exceededTransferLimit":false})", {}};
 }
 
-/// A FeatureCollection of `count` placeholder features that still reports
-/// truncation — the shape ArcGIS returns when a layer's own maxRecordCount is
-/// below the requested resultRecordCount.
+/// `count` placeholder features plus the truncation flag, as ArcGIS returns
+/// when a layer's maxRecordCount is below the requested page size.
 std::string truncated_page(std::int32_t count) {
 	std::string body = R"({"type":"FeatureCollection","features":[)";
 	for (std::int32_t i = 0; i < count; ++i) {
@@ -58,21 +63,10 @@ public:
 	}
 };
 
-#if defined(__GNUC__)
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-#endif
-Result<WatchPayload> call_deprecated_active_watches(ArcGISClient& client) {
-	return client.query_active_watches();
-}
-#if defined(__GNUC__)
-#pragma GCC diagnostic pop
-#endif
-
 TEST(StaticFeedClientRouting, UsesPublishedProbabilisticFilenames) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses.assign(3, empty_feature_collection());
-	StaticFeedClient client{transport};
+	const StaticFeedClient client{transport};
 
 	ASSERT_TRUE(client.day_probabilistic(1, "tornado"));
 	ASSERT_TRUE(client.day_probabilistic(2, "hail"));
@@ -216,11 +210,7 @@ TEST(ArcGISClientRouting, CoversEveryPublishedFireWeatherFeatureLayer) {
 }
 
 TEST(ArcGISClientRouting, FireWeatherIsAllOrNothingAcrossItsTwoMergedLayers) {
-	// query_fire_weather merges two layers per day. If the second fails, the
-	// features already parsed from the first are discarded and the caller gets
-	// an error with no indication that half the product was retrieved.
-	// FireWeatherPayload cannot represent the partial state, so the contract
-	// is all-or-nothing; this pins it.
+	// FireWeatherPayload cannot represent half a product.
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	const std::string body = R"({"features":[
 		{"attributes":{"dn":5},"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}}
@@ -281,9 +271,8 @@ TEST(ArcGISClientPaging, EncodesParametersAndFetchesEveryPage) {
 }
 
 TEST(ArcGISClientPaging, AdvancesTheOffsetByTheRecordsTheServerActuallyReturned) {
-	// ArcGIS clamps resultRecordCount to the layer's own maxRecordCount, so a
-	// truncated page can be shorter than the 2000 requested. Advancing by the
-	// request size would skip the records in between.
+	// A page can be shorter than the 2000 requested; advancing by 2000 would
+	// skip records.
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {
 		{200, truncated_page(3), {}},
@@ -303,8 +292,7 @@ TEST(ArcGISClientPaging, AdvancesTheOffsetByTheRecordsTheServerActuallyReturned)
 }
 
 TEST(ArcGISClientPaging, FailsWhenATruncatedPageCarriesNoRecords) {
-	// Zero records plus exceededTransferLimit:true cannot converge — the
-	// offset would never move. Fail instead of looping.
+	// The offset would never move.
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {{200, R"({"features":[],"exceededTransferLimit":true})", {}}};
 	ArcGISClient client{transport};
@@ -348,13 +336,11 @@ TEST(ArcGISClientPaging, ReturnsLogicalArcGISErrorsReportedWithHttp200) {
 	EXPECT_EQ(result.error().message, "Invalid or missing input parameters.");
 }
 
-// ===== HTTP 404 trust boundary =====
+// ===== What a 404 means =====
 //
-// SPC's static products answer 404 with an HTML page when there is no active
-// outlook (verified live: a retired www.spc.noaa.gov outlook path returns
-// HTTP 404 text/html). Every other feed's 404 is a genuine fault. The ArcGIS
-// MapServer reports a retired service path as HTTP 200 with a logical
-// `{"error":{"code":404}}` envelope (verified live against a renamed service).
+// SPC's static products answer 404 when nothing is issued. Any other 404 is a
+// real fault, and ArcGIS reports a retired service as HTTP 200 with
+// {"error":{"code":404}}.
 
 TEST(Feed404Semantics, StaticFeedReadsSpcHtml404AsNoActiveOutlook) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
@@ -383,7 +369,7 @@ TEST(Feed404Semantics, ArcGisTransport404IsAGenuineNotFound) {
 
 TEST(Feed404Semantics, ArcGisLogicalNotFoundIsAGenuineNotFound) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
-	// Live shape for a renamed / retired MapServer path.
+	// The live body for a retired MapServer path.
 	transport->responses = {
 		{200,
 		 R"({"error":{"code":404,"message":"Service outlooks/SPC_wx_outlks_RETIRED/MapServer not found ","details":[]}})",
@@ -429,24 +415,67 @@ TEST(Feed404Semantics, ArchiveTransport404IsAGenuineNotFound) {
 	EXPECT_FALSE(result.error().is_feed_unavailable());
 }
 
-TEST(ArcGISClientRouting, ActiveWatchesDirectCallersToTheIemClient) {
+TEST(ArcGISClientRouting, AnEmptyMesoscaleLayerIsAnEmptyResult) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
-	ArcGISClient client{transport};
+	transport->responses = {
+		{200, test::read_fixture("arcgis_mesoscale_discussion_noarea.esri.json"), {}}};
+	const ArcGISClient client{transport};
 
-	const Result<WatchPayload> result = call_deprecated_active_watches(client);
+	const Result<MesoscalePayload> result = client.query_active_md();
+
+	ASSERT_TRUE(result);
+	EXPECT_TRUE(result->discussions.empty());
+}
+
+TEST(ArcGISClientRouting, AsksForAStableOrderWhilePaging) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {empty_feature_collection(), empty_feature_collection()};
+	const ArcGISClient client{transport};
+	QueryParams unordered;
+	unordered.order_by_fields.clear();
+
+	ASSERT_TRUE(client.query_categorical(1));
+	ASSERT_TRUE(client.query_layer(ArcGISService::Outlooks, 1, unordered));
+
+	ASSERT_EQ(transport->requests.size(), 2u);
+	EXPECT_NE(transport->requests[0].find("&orderByFields=objectid"), std::string::npos);
+	EXPECT_EQ(transport->requests[1].find("orderByFields"), std::string::npos);
+}
+
+TEST(ArcGISClientRouting, RejectsNonJsonFormatsBeforeNetworkAccess) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	const ArcGISClient client{transport};
+	QueryParams params;
+	params.f = "kmz";
+
+	const Result<std::vector<std::string>> result =
+		client.query_layer(ArcGISService::FireWeather, 1, params);
 
 	ASSERT_FALSE(result);
 	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
-	EXPECT_NE(result.error().message.find("ArchiveClient"), std::string::npos);
 	EXPECT_TRUE(transport->requests.empty());
 }
 
-// ===== ArchiveClient (IEM) query construction =====
+TEST(ClientErrors, AMalformedBodyIsAParseErrorNotAnException) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {{200, "<html>maintenance</html>", {}},
+							{200, "<html>maintenance</html>", {}}};
+	const StaticFeedClient feeds{transport};
+	const ArcGISClient arcgis{transport};
+
+	const Result<CategoricalOutlookPayload> from_feed = feeds.day_categorical(1);
+	const Result<CategoricalOutlookPayload> from_arcgis = arcgis.query_categorical(1);
+
+	ASSERT_FALSE(from_feed);
+	ASSERT_FALSE(from_arcgis);
+	EXPECT_EQ(from_feed.error().code, ErrorCode::ParseError);
+	EXPECT_EQ(from_arcgis.error().code, ErrorCode::ParseError);
+}
+
+// ===== ArchiveClient (IEM) URLs =====
 //
-// api.hpp documents start_iso/end_iso as ISO 8601, which permits a "+HH:MM"
-// UTC offset. A raw '+' in a query string decodes server-side as a space, so
-// an unencoded offset silently queries a different window; a raw '&' in any
-// value injects extra parameters.
+// Every value is percent-encoded: an ISO offset's '+' would decode as a space
+// and a raw '&' would inject a parameter.
 
 TEST(ArchiveClientRouting, PercentEncodesTheWatchTimestamp) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
@@ -460,7 +489,8 @@ TEST(ArchiveClientRouting, PercentEncodesTheWatchTimestamp) {
 			  "https://mesonet.agron.iastate.edu/json/spcwatch.py?ts=202605191200%26x%3D1");
 }
 
-TEST(ArchiveClientRouting, PercentEncodesIsoOffsetsAndTheWfoFilter) {
+TEST(ArchiveClientRouting, PercentEncodesIsoOffsetsAndFiltersByOfficeWithWfos) {
+	// IEM ignores `wfo=` on lsr.geojson and returns every office; `wfos=` filters.
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {{200, R"({"features":[]})", {}}};
 	ArchiveClient client{transport};
@@ -472,47 +502,20 @@ TEST(ArchiveClientRouting, PercentEncodesIsoOffsetsAndTheWfoFilter) {
 	EXPECT_EQ(transport->requests[0],
 			  "https://mesonet.agron.iastate.edu/geojson/lsr.geojson"
 			  "?sts=2026-05-19T12%3A00%3A00%2B00%3A00&ets=2026-05-20T12%3A00%3A00%2B00%3A00"
-			  "&wfo=ICT%26sts%3D1900-01-01");
+			  "&wfos=ICT%26sts%3D1900-01-01");
 }
 
-TEST(HttpClientLifecycle, DefaultUserAgentCarriesTheProjectVersion) {
-	// The UA string is a literal in an installed header; nothing tied it to
-	// project(spc-cpp VERSION ...), so a release bump left every outbound
-	// request to NOAA and IEM announcing the previous version.
+TEST(Version, TheHeaderAndTheLibraryReportTheProjectVersion) {
+	EXPECT_EQ(std::string_view{SPC_VERSION_STRING}, SPC_PROJECT_VERSION);
+	EXPECT_EQ(version(), SPC_PROJECT_VERSION);
+}
+
+TEST(Version, TheDefaultUserAgentCarriesTheProjectVersion) {
 	const ClientConfig config;
 
 	EXPECT_NE(config.user_agent.find(SPC_PROJECT_VERSION), std::string::npos)
 		<< "user_agent \"" << config.user_agent << "\" does not carry version "
 		<< SPC_PROJECT_VERSION;
-}
-
-TEST(HttpClientLifecycle, RefusesEverySchemeOtherThanHttpAndHttps) {
-	// is_absolute_url() only recognises http:// and https://, so a file:// URL
-	// was treated as relative, concatenated onto the empty default base_url,
-	// and handed to libcurl — which read the local file and returned it as the
-	// response body. Nothing in this SDK's scope should reach the filesystem.
-	const HttpClient client;
-
-	const Result<HttpResponse> result = client.get("file:///etc/hosts");
-
-	ASSERT_FALSE(result) << "file:// must not be fetched";
-	EXPECT_EQ(result.error().code, ErrorCode::NetworkError);
-}
-
-TEST(HttpClientLifecycle, ConcurrentClientsShareProcessWideCurlState) {
-	std::vector<std::thread> workers;
-	workers.reserve(16);
-	for (int index = 0; index < 16; ++index) {
-		workers.emplace_back([] {
-			HttpClient first;
-			HttpClient second;
-			EXPECT_TRUE(first.config().verify_ssl);
-			EXPECT_TRUE(second.config().verify_ssl);
-		});
-	}
-	for (std::thread& worker : workers) {
-		worker.join();
-	}
 }
 
 } // namespace

@@ -1,37 +1,29 @@
 /// @file test_corpus.cpp
-/// @brief Drives the shared live-captured SPC fixture corpus through the
-/// extracted `spc::parse_*` functions. This is the spc-cpp side of the
-/// byte-identity contract: the same fixtures the spc-data PR-0 golden was
-/// frozen over must parse to the same feature counts / labels / probs here.
-/// The authoritative byte-for-byte SQL diff runs in spc-data PR-3; this
-/// guards the SDK in isolation so a regression is caught in spc-cpp's own CI.
+/// @brief The captured SPC fixtures through the Day 1-3 parsers. spc-data
+/// checks the same fixtures for identical output; this catches a regression
+/// here first.
 
 #include "spc/models/outlook.hpp"
 
-#include <filesystem>
-#include <fstream>
 #include <gtest/gtest.h>
-#include <sstream>
+#include <stdexcept>
 #include <string>
+
+#include "support/fixtures.hpp"
 
 namespace {
 
 using namespace spc;
-
-std::string slurp(const std::string& name) {
-	std::ifstream f(std::filesystem::path(SPC_FIXTURES_DIR) / name, std::ios::binary);
-	EXPECT_TRUE(f.is_open()) << "missing fixture: " << name;
-	std::stringstream buf;
-	buf << f.rdbuf();
-	return buf.str();
-}
+using test::read_fixture;
 
 TEST(Corpus, StaticCategoricalFeeds) {
-	// The 3 live static www.spc.noaa.gov day1-3 categorical feeds (uppercase
-	// LABEL/ISSUE/VALID/EXPIRE, Polygon + MultiPolygon).
-	const CategoricalOutlookPayload d1 = parse_categorical(slurp("day1otlk_cat.nolyr.geojson"), 1);
-	const CategoricalOutlookPayload d2 = parse_categorical(slurp("day2otlk_cat.nolyr.geojson"), 2);
-	const CategoricalOutlookPayload d3 = parse_categorical(slurp("day3otlk_cat.nolyr.geojson"), 3);
+	// Uppercase LABEL/ISSUE/VALID/EXPIRE, Polygon and MultiPolygon.
+	const CategoricalOutlookPayload d1 =
+		parse_categorical(read_fixture("day1otlk_cat.nolyr.geojson"), 1);
+	const CategoricalOutlookPayload d2 =
+		parse_categorical(read_fixture("day2otlk_cat.nolyr.geojson"), 2);
+	const CategoricalOutlookPayload d3 =
+		parse_categorical(read_fixture("day3otlk_cat.nolyr.geojson"), 3);
 	EXPECT_EQ(d1.day_offset, 1);
 	EXPECT_EQ(d2.day_offset, 2);
 	EXPECT_EQ(d3.day_offset, 3);
@@ -46,10 +38,9 @@ TEST(Corpus, StaticCategoricalFeeds) {
 }
 
 TEST(Corpus, ArcGISGeoJsonCategoricalParses) {
-	// ArcGIS f=geojson mirror uses lowercase label/issue/valid/expire — this
-	// exercises the parser's case-variant fallback chain.
+	// ArcGIS uses lowercase label/issue/valid/expire.
 	const CategoricalOutlookPayload p =
-		parse_categorical(slurp("arcgis_day1_categorical.geojson"), 1);
+		parse_categorical(read_fixture("arcgis_day1_categorical.geojson"), 1);
 	EXPECT_GT(p.features.size(), 0u);
 	bool saw_tstm = false;
 	for (const OutlookFeature& f : p.features) {
@@ -62,13 +53,10 @@ TEST(Corpus, ArcGISGeoJsonCategoricalParses) {
 }
 
 TEST(Corpus, ProbabilisticParsesAndScales) {
-	// ArcGIS f=geojson probabilistic tornado: label is the already-normalized
-	// fraction "0.02"/"0.05"/"0.10". parse_probabilistic passes fractions
-	// through (only integer-percent forms are /100'd), so a "0.02" label ->
-	// 0.02 probability — NOT the 0.0002 a bare /100 used to produce. The
-	// >= 0.01 floor pins that fix (every real SPC isopleth is >= 2%).
+	// Labels are fractions ("0.02"); every real isopleth is at least 2%, so
+	// the 0.01 floor catches a stray division by 100.
 	const ProbOutlookPayload p =
-		parse_probabilistic(slurp("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
+		parse_probabilistic(read_fixture("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
 	ASSERT_GT(p.features.size(), 0u);
 	for (const ProbOutlookFeature& f : p.features) {
 		EXPECT_EQ(f.hazard, "tornado");
@@ -79,9 +67,8 @@ TEST(Corpus, ProbabilisticParsesAndScales) {
 }
 
 TEST(Corpus, MalformedBodyThrows) {
-	// spc-data contract: parse_* throws std::runtime_error on malformed JSON
-	// (the SPC HTML 404 body is the canonical example). main.cpp catches it.
-	EXPECT_THROW((void)parse_categorical(slurp("spc_404_no_active_outlook.html"), 1),
+	// SPC's HTML 404 page is the usual malformed body.
+	EXPECT_THROW((void)parse_categorical(read_fixture("spc_404_no_active_outlook.html"), 1),
 				 std::runtime_error);
 }
 

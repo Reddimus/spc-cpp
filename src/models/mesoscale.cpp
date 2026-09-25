@@ -1,61 +1,40 @@
 /// @file mesoscale.cpp
-/// @brief Net-new MD parser — metadata + geometry only; narrative untouched.
+/// @brief Mesoscale discussion parser: metadata and geometry only.
 
 #include "spc/models/mesoscale.hpp"
 
-#include "spc/models/common.hpp"
-
-#include <stdexcept>
 #include <utility>
+
+#include "models/json.hpp"
 
 namespace spc {
 
-namespace {
-
-Json parse_root_or_throw(std::string_view body) {
-	glz::expected<Json, std::string> root = detail::parse_root(body);
-	if (!root) {
-		throw std::runtime_error(root.error());
-	}
-	return std::move(*root);
-}
-
-const Json* props_of(const Json& feat) {
-	const Json* p = detail::lookup(feat, "properties");
-	if (p != nullptr) {
-		return p;
-	}
-	return detail::lookup(feat, "attributes");
-}
-
-} // namespace
+using detail::Json;
 
 MesoscalePayload parse_mesoscale_discussions(std::string_view body) {
-	const Json root = parse_root_or_throw(body);
+	const Json root = detail::parse_root_or_throw(body);
 	MesoscalePayload payload;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	for (const glz::generic& feat : features_node->get_array()) {
-		const Json* props = props_of(feat);
-		const Json* geometry = detail::lookup(feat, "geometry");
+	for (const Json& feat : features_node->get_array()) {
+		const Json* props = detail::feature_fields(feat);
 		if (props == nullptr) {
 			continue;
 		}
 		MesoscaleDiscussion md;
-		md.name = detail::json_string(*props, "name");
-		if (md.name.empty()) {
-			md.name = detail::json_string(*props, "NAME");
+		md.name = detail::first_string(*props, {"name", "NAME"});
+		// With no active discussion the layer still holds one placeholder
+		// feature named "NoArea" with a tiny ring and null links.
+		if (md.name == "NoArea") {
+			continue;
 		}
 		md.folder_path = detail::json_string(*props, "folderpath");
-		// `popupinfo` is the spc.noaa.gov product URL — kept raw, narrative
-		// deliberately not fetched/parsed.
 		md.url = detail::json_string(*props, "popupinfo");
+		const Json* geometry = detail::lookup(feat, "geometry");
 		if (geometry != nullptr) {
-			md.rings = detail::lookup(*geometry, "rings") != nullptr
-						   ? detail::parse_esri_rings(*geometry)
-						   : detail::parse_rings(*geometry);
+			md.rings = detail::feature_rings(*geometry);
 		}
 		payload.discussions.push_back(std::move(md));
 	}

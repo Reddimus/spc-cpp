@@ -1,12 +1,10 @@
+/// @file http_client.hpp
+/// @brief The GET transport used by every client.
+
 #pragma once
 
 #include "spc/error.hpp"
-
-/// Set from `PROJECT_VERSION` by the build. The fallback keeps the header
-/// usable when it is read outside the project's own CMake targets.
-#ifndef SPC_VERSION_STRING
-#define SPC_VERSION_STRING "0.3.0"
-#endif
+#include "spc/version.hpp"
 
 #include <chrono>
 #include <cstddef>
@@ -19,47 +17,51 @@
 
 namespace spc {
 
-/// HTTP response.
+/// An HTTP response. Any status code is a successful transfer; the clients
+/// decide what a non-200 status means.
 struct HttpResponse {
-	std::int16_t status_code; // HTTP status codes fit in int16 (100-599)
+	std::int16_t status_code;
 	std::string body;
+	/// Headers of the final response, after redirects.
 	std::vector<std::pair<std::string, std::string>> headers;
 };
 
-/// HTTP client configuration. SPC / ArcGIS / IEM are all unauthenticated
-/// GETs; the only required field semantics match spc-data's fetcher.
+/// HttpClient settings. SPC, NOAA ArcGIS, and IEM are all unauthenticated.
 struct ClientConfig {
-	/// Optional base URL. Empty (the default) means callers pass absolute
-	/// URLs — one client then serves spc.noaa.gov, the ArcGIS MapServer,
-	/// and the IEM archive interchangeably (spc-data's fetcher behavior).
+	/// Prefix for relative paths. Leave empty to pass absolute URLs, which is
+	/// what the SDK's clients do.
 	std::string base_url;
 	std::string user_agent{"spc-cpp/" SPC_VERSION_STRING " (contact@predictioncast.ai)"};
 	std::chrono::seconds timeout{15};
 	bool verify_ssl{true};
-	/// Hard ceiling on a single response body. A wide IEM archive window is
-	/// unbounded by construction — the caller chooses the date range — and the
-	/// body is buffered whole, then parsed into a full JSON AST, then into the
-	/// payload. Exceeding this aborts the transfer with a network error.
+	/// Largest response body accepted. Bodies are held in memory and parsed
+	/// whole, and an IEM date range can be arbitrarily large. A bigger
+	/// response fails with `ErrorCode::NetworkError`.
 	std::size_t max_response_bytes{64UL * 1024UL * 1024UL};
 };
 
-/// GET transport boundary used by the high-level clients.
-///
-/// Applications normally use HttpClient. The interface also lets callers
-/// supply their own networking stack and lets tests run without NOAA access.
+/// The GET interface the clients use. Implement it to supply your own
+/// network stack or canned test responses. One transport may be shared by
+/// several clients and threads, so `get` must be safe to call concurrently.
 class HttpTransport {
 public:
 	virtual ~HttpTransport() = default;
 
 	[[nodiscard]] virtual Result<HttpResponse> get(std::string_view path) const = 0;
+
+protected:
+	HttpTransport() = default;
+	HttpTransport(const HttpTransport&) = default;
+	HttpTransport& operator=(const HttpTransport&) = default;
+	HttpTransport(HttpTransport&&) = default;
+	HttpTransport& operator=(HttpTransport&&) = default;
 };
 
-/// GET-only HTTP client. Behavior parity with spc-data/src/fetcher.cpp:
-/// FOLLOWLOCATION on, NOSIGNAL on, empty ACCEPT_ENCODING (advertise all
-/// supported), and the SPC User-Agent.
+/// libcurl-backed transport. Follows redirects, accepts compressed bodies,
+/// and speaks only http and https.
 ///
-/// @note NOT thread-safe — the CURL handle is shared per instance. Use one
-/// client per thread or guard with a mutex.
+/// Thread-safe: concurrent `get` calls each use their own pooled libcurl
+/// handle, and handles are reused so connections stay open between requests.
 class HttpClient final : public HttpTransport {
 public:
 	explicit HttpClient(ClientConfig config = {});
@@ -70,13 +72,12 @@ public:
 	HttpClient(const HttpClient&) = delete;
 	HttpClient& operator=(const HttpClient&) = delete;
 
-	/// GET `path`. If `path` is an absolute `http://` or `https://` URL it is
-	/// used verbatim; otherwise it is appended to `config().base_url`. Only
-	/// those two schemes are accepted — every other scheme (`file://`,
-	/// `dict://`, `scp://`, ...) is refused by the transport, on the request
-	/// and on any redirect.
+	/// GET `path`. An absolute `http://` or `https://` URL is used as is;
+	/// anything else is appended to `config().base_url`. Every other scheme,
+	/// such as `file://`, is refused, including on redirects.
 	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
+	/// The settings this client was built with. Not valid on a moved-from client.
 	[[nodiscard]] const ClientConfig& config() const noexcept;
 
 private:

@@ -1,50 +1,41 @@
-# SPC characterization fixtures
+# Test fixtures
 
-Most payloads here were captured live on 2026-05-17. They pin the parser parity
-corpus. Files ending in `.synthetic.json` cover states that had no live features
-at capture time.
+Responses captured from the live services, mostly on 2026-05-17. Files ending
+in `.synthetic.json` are hand-made for states that had no live data.
+`SHA256SUMS` covers every file here; `make fixtures-check` verifies it.
 
-## Static `www.spc.noaa.gov` GeoJSON
+## SPC static GeoJSON (www.spc.noaa.gov)
 
-- `day1otlk_cat.nolyr.geojson`, `day2otlk_cat.nolyr.geojson`,
-  `day3otlk_cat.nolyr.geojson` — live day 1/2/3 categorical outlooks
-  (uppercase `LABEL`/`ISSUE`/`VALID`/`EXPIRE`, Polygon + MultiPolygon).
-- `day4prob.nolyr.geojson` — live day4-8 experimental probabilistic outlook
-  (`LABEL` as `"0.15"` numeric-string).
-- `spc_404_no_active_outlook.html` — the literal HTML body SPC returns with
-  HTTP 404 when no active outlook exists (e.g. day-1 probabilistic overnight).
-  Characterizes `main.cpp`'s 404 -> clear-rows path. The static
-  `day{1,2}otlk_*.nolyr.geojson` feeds were 404 at capture time (the
-  documented normal overnight state) so the probabilistic GeoJSON corpus comes
-  from the ArcGIS `f=geojson` mirror of the same upstream product (below).
+- `day{1,2,3}otlk_cat.nolyr.geojson`: categorical outlooks. Uppercase
+  `LABEL`, `ISSUE`, `VALID`, `EXPIRE`; Polygon and MultiPolygon geometry.
+- `day4prob.nolyr.geojson`: Day 4 probability, with `LABEL` as the string
+  `"0.15"`.
+- `spc_404_no_active_outlook.html`: the HTML page SPC serves with HTTP 404
+  when a product is not issued.
 
-## ArcGIS MapServer (`mapservices.weather.noaa.gov`, the primary path)
+## NOAA ArcGIS (mapservices.weather.noaa.gov)
 
-`SPC_wx_outlks` MapServer, captured both ways for the Esri-vs-GeoJSON parity
-test (`*.esri.json` = `f=json` Esri rings; `*.geojson` = `f=geojson`):
+Pairs captured as Esri JSON (`.esri.json`, `f=json`) and GeoJSON (`.geojson`,
+`f=geojson`) for the parity tests:
 
-- `arcgis_day{1,2,3}_categorical.{esri.json,geojson}`
-- `arcgis_day1_prob_{tornado,hail,wind}.{esri.json,geojson}`,
-  `arcgis_day2_prob_wind.{esri.json,geojson}` — active probabilistic isopleths
-  (`dn` numeric percent + `label` as `"0.02"`; lowercase `valid`/`expire`).
-- `arcgis_day1_torn_conditional_intensity.esri.json` — net-new conditional
-  intensity (`label` `"CIG1"`).
-- `arcgis_day4_8_nonempty.synthetic.json` pins a nonempty day 4 response.
-- `arcgis_day{1,2}_fire_weather.esri.json` — `SPC_firewx` MapServer.
-- `arcgis_mesoscale_discussion.esri.json` — `spc_mesoscale_discussion`
-  MapServer (raw `name`/`folderpath`/`popupinfo`; narrative NOT parsed).
+- `arcgis_day{1,2,3}_categorical`
+- `arcgis_day1_prob_{tornado,hail,wind}` and `arcgis_day2_prob_wind`. `label`
+  is a fraction such as `"0.02"`; field names are lowercase.
 
-## Layer metadata
+Single captures:
 
-`arcgis_layers_2026-09-03.json` records NOAA ArcGIS 11.3 layer IDs, names, and
-parents from the three service metadata URLs stored in the file. Run
-`python3 tools/verify_arcgis_metadata.py` to compare it with the live services.
+- `arcgis_day1_torn_conditional_intensity.esri.json`: `label` `"CIG1"`.
+- `arcgis_day4_8_nonempty.synthetic.json`: a non-empty Day 4 response.
+- `arcgis_day{1,2}_fire_weather.esri.json`: fire weather, with only a numeric
+  `dn` and no label.
+- `arcgis_mesoscale_discussion.esri.json`: one active discussion.
+- `arcgis_mesoscale_discussion_noarea.esri.json`: the `NoArea` placeholder the
+  layer returns when no discussion is active (captured 2026-09-25).
+- `arcgis_layers_2026-09-03.json`: layer ids, names, and parents of the three
+  MapServers. `python3 tools/verify_arcgis_metadata.py` compares it with the
+  live services.
 
-`SHA256SUMS` covers every payload and metadata fixture. Run `make
-fixtures-check` after checkout and whenever a fixture changes.
+## IEM (mesonet.agron.iastate.edu)
 
-## IEM archive (`mesonet.agron.iastate.edu`, best-effort backfill)
-
-- `iem_storm_reports.json` — LSR GeoJSON FeatureCollection (Point geometry).
-- `iem_spc_watch.json` — active/historical SPC watch GeoJSON.
-- `iem_spcoutlook_torn.json` — IEM's tabular SPC outlook index JSON.
+- `iem_storm_reports.json`: Local Storm Reports, Point geometry.
+- `iem_spc_watch.json`: SPC watches.

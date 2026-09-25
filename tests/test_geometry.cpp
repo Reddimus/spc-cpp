@@ -1,7 +1,11 @@
-// Moved verbatim from spc-data/tests/test_geometry.cpp (Workstream C).
-// Asserts are identical; only the include path + namespace changed.
+/// @file test_geometry.cpp
+/// @brief Point-in-polygon tests. The first three match spc-data's own.
 
 #include "spc/geometry.hpp"
+#include "spc/models/convective.hpp"
+#include "spc/models/fire_weather.hpp"
+#include "spc/models/mesoscale.hpp"
+#include "spc/models/watch.hpp"
 
 #include <gtest/gtest.h>
 
@@ -34,6 +38,30 @@ TEST(Geometry, MultiRingFeature) {
 	EXPECT_TRUE(point_in_feature(0.5, 0.5, feat));
 	EXPECT_TRUE(point_in_feature(10.5, 10.5, feat));
 	EXPECT_FALSE(point_in_feature(5.0, 5.0, feat));
+}
+
+const Polygon kUnitSquare = {{0.0, 0.0}, {1.0, 0.0}, {1.0, 1.0}, {0.0, 1.0}, {0.0, 0.0}};
+
+template <typename Feature>
+void expect_membership_for() {
+	Feature feature;
+	feature.rings.push_back(kUnitSquare);
+	EXPECT_TRUE(point_in_feature(0.5, 0.5, feature));
+	EXPECT_FALSE(point_in_feature(2.0, 2.0, feature));
+}
+
+TEST(Geometry, EveryFeatureTypeWithRingsSupportsMembership) {
+	expect_membership_for<ProbOutlookFeature>();
+	expect_membership_for<Day48Feature>();
+	expect_membership_for<ConditionalIntensityFeature>();
+	expect_membership_for<FireWeatherFeature>();
+	expect_membership_for<MesoscaleDiscussion>();
+	expect_membership_for<Watch>();
+}
+
+TEST(Geometry, EmptyShapesContainNothing) {
+	EXPECT_FALSE(point_in_polygon(0.0, 0.0, Polygon{}));
+	EXPECT_FALSE(point_in_feature(0.0, 0.0, OutlookFeature{}));
 }
 
 } // namespace
