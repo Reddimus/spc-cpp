@@ -27,6 +27,8 @@ include(CMakePackageConfigHelpers)
 option(SPC_BUILD_TESTS "Build the unit tests" ${PROJECT_IS_TOP_LEVEL})
 option(SPC_BUILD_EXAMPLES "Build the examples" ${PROJECT_IS_TOP_LEVEL})
 option(SPC_INSTALL "Generate install and package-config rules" ${PROJECT_IS_TOP_LEVEL})
+# Off even at top level, since it fetches Google Benchmark. Never installed.
+option(SPC_BUILD_BENCHMARKS "Build the benchmarks" OFF)
 # Off by default: LTO puts compiler-specific bitcode in the static libraries,
 # which a consumer on another compiler or version cannot link.
 option(SPC_ENABLE_LTO "Enable link-time optimization for Release builds" OFF)
@@ -118,6 +120,22 @@ if(SPC_BUILD_TESTS)
     FetchContent_MakeAvailable(googletest)
     enable_testing()
     add_subdirectory(tests)
+endif()
+
+if(SPC_BUILD_BENCHMARKS)
+    FetchContent_Declare(
+        benchmark
+        GIT_REPOSITORY https://github.com/google/benchmark.git
+        GIT_TAG v1.9.5
+        GIT_SHALLOW TRUE
+        SYSTEM
+        EXCLUDE_FROM_ALL
+    )
+    set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
+    set(BENCHMARK_ENABLE_WERROR OFF CACHE BOOL "" FORCE)
+    FetchContent_MakeAvailable(benchmark)
+    add_subdirectory(benchmarks)
 endif()
 
 if(SPC_BUILD_EXAMPLES)

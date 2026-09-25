@@ -31,9 +31,15 @@ jobs:
           # The locale tests skip without a comma-decimal locale.
           sudo locale-gen de_DE.UTF-8
       - name: Build
-        run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
+        run: >-
+          make build CMAKE_ARGS="-DSPC_WARNINGS_AS_ERRORS=ON
+          -DSPC_BUILD_BENCHMARKS=ON"
       - name: Test
         run: make test
+      # One iteration each: it fails when a benchmark reports an error, never
+      # on timing.
+      - name: Run each benchmark once
+        run: build/benchmarks/spc_benchmarks --benchmark_dry_run=true
       - name: Verify fixture checksums
         run: make fixtures-check
       - name: Lint
