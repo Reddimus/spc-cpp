@@ -467,6 +467,18 @@ TEST(Models, WatchNumbersThatAreNotFiniteIntegersBecomeZero) {
 	}
 }
 
+TEST(Models, StormReportsReserveOnlyForReports) {
+	// Values that aren't features become no reports, so they reserve nothing.
+	std::string body = R"({"type":"FeatureCollection","features":[)";
+	for (int i = 0; i < 10000; ++i) {
+		body += i == 0 ? "0" : ",0";
+	}
+	body += "]}";
+	const StormReportPayload p = parse_storm_reports(body);
+	EXPECT_TRUE(p.reports.empty());
+	EXPECT_EQ(p.reports.capacity(), std::vector<StormReport>{}.capacity());
+}
+
 TEST(Models, StormReportsParseIemLsr) {
 	const StormReportPayload p = parse_storm_reports(read_fixture("iem_storm_reports.json"));
 	ASSERT_GT(p.reports.size(), 0u);
