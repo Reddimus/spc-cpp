@@ -32,11 +32,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Builds without floating-point `std::from_chars` (libc++ before 20, and
   macOS targets before 26) parsed numeric strings such as probability labels
   with a string stream, which disagreed with every other build. It read
-  `0x10` as 16 and rejected `12abc`, subnormals such as `1e-310`, and a
-  bare trailing exponent such as `5e`, so those fields became 0 on those
-  builds. Every platform now uses the fast_float code that Glaze
-  already bundles, which also parses a number in about a tenth of the
-  stream's instructions.
+  `0x10` as 16 and rejected `12abc`, subnormals such as `1e-310`, a bare
+  trailing exponent such as `5e`, and, with Apple's libc++, `inf` and `nan`,
+  so those fields became 0 on those builds. Every platform now uses the
+  fast_float code that Glaze already bundles, which also parses a number in
+  about a tenth of the stream's instructions.
 - The `parse_*` functions could read past the end of the `std::string_view`
   they were given. A view over the start of a larger buffer could parse as
   if it were the whole buffer, and a view that ran to the end of its buffer
