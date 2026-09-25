@@ -1,0 +1,4 @@
+# Byte-exact test data: a CRLF checkout would change parser input,
+# golden output, and fixture checksums.
+tests/fixtures/** -text
+tests/golden/** -text

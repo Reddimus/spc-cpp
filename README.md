@@ -35,7 +35,8 @@ int main() {
 
 ## Add it to your project
 
-- CMake 3.31 or newer. Ubuntu 24.04 ships 3.28, so run `pipx install cmake`.
+- CMake 3.31 or newer. Ubuntu 24.04 ships 3.28, so run
+  `sudo snap install cmake --classic`.
 - GCC 13+, Clang 18+ with libc++ or 19+ with libstdc++, or Apple Clang 17+.
 - libcurl 7.85 or newer with its headers: `libcurl4-openssl-dev` on Ubuntu,
   built into macOS.

@@ -12,3 +12,9 @@ endif()
 
 add_executable(spc_fetchcontent_consumer ../main.cpp)
 target_link_libraries(spc_fetchcontent_consumer PRIVATE spc::spc)
+
+# tools/test_consumers.sh passes the README's quick start, to compile only.
+if(SPC_QUICK_START)
+    add_executable(spc_quick_start "${SPC_QUICK_START}")
+    target_link_libraries(spc_quick_start PRIVATE spc::spc)
+endif()

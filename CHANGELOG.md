@@ -32,6 +32,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   if it were the whole buffer, and a view that ran to the end of its buffer
   was read one byte past it. Clients are unaffected, since they parse the
   strings they own.
+- The `ErrorCode` comments in `error.hpp` now agree with the README: a bad
+  ArcGIS layer id is `InvalidRequest`, HTTP 503 is `RateLimited`, and
+  `ParseError` means the body was not JSON.
 
 ## [0.4.1] - 2026-09-25
 
@@ -54,8 +57,7 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- On macOS, any `CMAKE_OSX_DEPLOYMENT_TARGET` below 26.0 failed to compile,
-  and a default build would not start on a Mac older than macOS 26.
+- On macOS, any `CMAKE_OSX_DEPLOYMENT_TARGET` below 26.0 failed to compile.
   Floating-point `std::from_chars` was used whenever libc++ was version 20 or
   newer, but Apple's libc++ provides it only from macOS 26. Older targets now
   use the stream parser, so the earliest supported macOS is 13.4.
