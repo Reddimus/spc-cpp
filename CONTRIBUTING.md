@@ -36,8 +36,10 @@ make fixtures-check   # fixture checksums
 make test-consumers   # installed and FetchContent consumers
 ```
 
-CI also runs the tests with ASan and UBSan, with TSan, and with Clang 18 and
-libc++, and it compiles the libraries with clang-tidy. To match those locally:
+CI also runs the tests with ASan and UBSan, with TSan, and on the oldest
+compilers the README lists: Clang 18 with libc++, Clang 19 with libstdc++,
+and Apple Clang 17. It compiles the libraries with clang-tidy too. To run the
+sanitizers and clang-tidy locally:
 
 ```bash
 make test BUILD_DIR=build-asan CMAKE_ARGS=-DSPC_ENABLE_SANITIZERS=ON

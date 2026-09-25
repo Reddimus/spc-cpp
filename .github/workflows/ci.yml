@@ -65,6 +65,24 @@ jobs:
       - name: Test
         run: make test
 
+  # The README's oldest Clang with libstdc++.
+  build-linux-clang19:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang-19 libcurl4-openssl-dev
+      - name: Build
+        run: >-
+          make build CMAKE_ARGS="-DCMAKE_CXX_COMPILER=clang++-19
+          -DSPC_WARNINGS_AS_ERRORS=ON"
+      - name: Test
+        run: make test
+
   # The README build on a Mac: Apple Clang and the system libcurl. One
   # universal binary targeting macOS 13.4 covers both architectures, and
   # test-macos runs it on an older macOS and a real Intel Mac.
@@ -132,6 +150,26 @@ jobs:
           sw_vers -productVersion && uname -m
           build/tests/spc_tests
           build/examples/example_parse_outlook
+
+  # The README's oldest Apple Clang, 17, from Xcode 16.4.
+  build-macos-xcode16:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Select Xcode 16.4
+        run: |
+          sudo xcode-select -s /Applications/Xcode_16.4.app
+          version=$(c++ --version)
+          echo "$version"
+          grep -q '^Apple clang version 17\.' <<<"$version"
+      - name: Build
+        run: >-
+          cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPC_WARNINGS_AS_ERRORS=ON
+          -DCMAKE_OSX_DEPLOYMENT_TARGET=13.4
+      - run: cmake --build build --parallel
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
 
   markdown-lint:
     runs-on: ubuntu-latest
