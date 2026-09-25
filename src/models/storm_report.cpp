@@ -18,7 +18,10 @@ StormReportPayload parse_storm_reports(std::string_view body) {
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	for (const Json& feat : features_node->get_array()) {
+	const Json::array_t& features = features_node->get_array();
+	// Every IEM feature has properties, so this sizes the list exactly.
+	payload.reports.reserve(features.size());
+	for (const Json& feat : features) {
 		const Json* props = detail::lookup(feat, "properties");
 		if (props == nullptr) {
 			continue;
