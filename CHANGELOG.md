@@ -305,5 +305,4 @@ SDKs. SPC's `properties` block is shape-loose (case-variant `LABEL` vs
 (`Polygon` vs `MultiPolygon`). The extracted parser walks a
 `glz::generic` AST rather than a static `glz::meta` schema; this is the
 exact, proven `spc-data` code path and is preserved verbatim so the
-downstream byte-identity guarantee holds. See the README
-"JSON library: Glaze (divergence note)" section.
+downstream byte-identity guarantee holds.
