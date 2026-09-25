@@ -6,6 +6,8 @@
 #include "models/from_tree.hpp"
 #include "models/json.hpp"
 
+#include <algorithm>
+#include <cstddef>
 #include <utility>
 
 namespace spc {
@@ -19,8 +21,10 @@ StormReportPayload detail::storm_reports_from_tree(const Json& root) {
 		return payload;
 	}
 	const Json::array_t& features = features_node->get_array();
-	// Every IEM feature has properties, so this sizes the list exactly.
-	payload.reports.reserve(features.size());
+	// Count first so a body padded with values that aren't features can't make
+	// the list reserve room for reports it never gets.
+	payload.reports.reserve(static_cast<std::size_t>(std::ranges::count_if(
+		features, [](const Json& feat) { return detail::lookup(feat, "properties") != nullptr; })));
 	for (const Json& feat : features) {
 		const Json* props = detail::lookup(feat, "properties");
 		if (props == nullptr) {
