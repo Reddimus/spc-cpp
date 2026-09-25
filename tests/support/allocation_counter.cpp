@@ -146,86 +146,96 @@ AllocationStats AllocationProbe::stats() const noexcept {
 
 } // namespace spc::test
 
-void* operator new(std::size_t size) {
+// LTO may internalize the replacements (ld64 does), and then allocations made
+// inside a shared standard library bypass them. This keeps them exported.
+#if defined(__GNUC__)
+#define SPC_REPLACEMENT __attribute__((used, visibility("default")))
+#else
+#define SPC_REPLACEMENT
+#endif
+
+SPC_REPLACEMENT void* operator new(std::size_t size) {
 	return allocate(size, 0);
 }
 
-void* operator new[](std::size_t size) {
+SPC_REPLACEMENT void* operator new[](std::size_t size) {
 	return allocate(size, 0);
 }
 
-void* operator new(std::size_t size, std::align_val_t alignment) {
+SPC_REPLACEMENT void* operator new(std::size_t size, std::align_val_t alignment) {
 	return allocate(size, to_size(alignment));
 }
 
-void* operator new[](std::size_t size, std::align_val_t alignment) {
+SPC_REPLACEMENT void* operator new[](std::size_t size, std::align_val_t alignment) {
 	return allocate(size, to_size(alignment));
 }
 
-void* operator new(std::size_t size, const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void* operator new(std::size_t size, const std::nothrow_t& /*tag*/) noexcept {
 	return allocate_nothrow(size, 0);
 }
 
-void* operator new[](std::size_t size, const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void* operator new[](std::size_t size, const std::nothrow_t& /*tag*/) noexcept {
 	return allocate_nothrow(size, 0);
 }
 
-void* operator new(std::size_t size, std::align_val_t alignment,
-				   const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void* operator new(std::size_t size, std::align_val_t alignment,
+								   const std::nothrow_t& /*tag*/) noexcept {
 	return allocate_nothrow(size, to_size(alignment));
 }
 
-void* operator new[](std::size_t size, std::align_val_t alignment,
-					 const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void* operator new[](std::size_t size, std::align_val_t alignment,
+									 const std::nothrow_t& /*tag*/) noexcept {
 	return allocate_nothrow(size, to_size(alignment));
 }
 
-void operator delete(void* ptr) noexcept {
+SPC_REPLACEMENT void operator delete(void* ptr) noexcept {
 	deallocate(ptr, 0);
 }
 
-void operator delete[](void* ptr) noexcept {
+SPC_REPLACEMENT void operator delete[](void* ptr) noexcept {
 	deallocate(ptr, 0);
 }
 
-void operator delete(void* ptr, std::size_t /*size*/) noexcept {
+SPC_REPLACEMENT void operator delete(void* ptr, std::size_t /*size*/) noexcept {
 	deallocate(ptr, 0);
 }
 
-void operator delete[](void* ptr, std::size_t /*size*/) noexcept {
+SPC_REPLACEMENT void operator delete[](void* ptr, std::size_t /*size*/) noexcept {
 	deallocate(ptr, 0);
 }
 
-void operator delete(void* ptr, std::align_val_t alignment) noexcept {
+SPC_REPLACEMENT void operator delete(void* ptr, std::align_val_t alignment) noexcept {
 	deallocate(ptr, to_size(alignment));
 }
 
-void operator delete[](void* ptr, std::align_val_t alignment) noexcept {
+SPC_REPLACEMENT void operator delete[](void* ptr, std::align_val_t alignment) noexcept {
 	deallocate(ptr, to_size(alignment));
 }
 
-void operator delete(void* ptr, std::size_t /*size*/, std::align_val_t alignment) noexcept {
+SPC_REPLACEMENT void operator delete(void* ptr, std::size_t /*size*/,
+									 std::align_val_t alignment) noexcept {
 	deallocate(ptr, to_size(alignment));
 }
 
-void operator delete[](void* ptr, std::size_t /*size*/, std::align_val_t alignment) noexcept {
+SPC_REPLACEMENT void operator delete[](void* ptr, std::size_t /*size*/,
+									   std::align_val_t alignment) noexcept {
 	deallocate(ptr, to_size(alignment));
 }
 
-void operator delete(void* ptr, const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void operator delete(void* ptr, const std::nothrow_t& /*tag*/) noexcept {
 	deallocate(ptr, 0);
 }
 
-void operator delete[](void* ptr, const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void operator delete[](void* ptr, const std::nothrow_t& /*tag*/) noexcept {
 	deallocate(ptr, 0);
 }
 
-void operator delete(void* ptr, std::align_val_t alignment,
-					 const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void operator delete(void* ptr, std::align_val_t alignment,
+									 const std::nothrow_t& /*tag*/) noexcept {
 	deallocate(ptr, to_size(alignment));
 }
 
-void operator delete[](void* ptr, std::align_val_t alignment,
-					   const std::nothrow_t& /*tag*/) noexcept {
+SPC_REPLACEMENT void operator delete[](void* ptr, std::align_val_t alignment,
+									   const std::nothrow_t& /*tag*/) noexcept {
 	deallocate(ptr, to_size(alignment));
 }

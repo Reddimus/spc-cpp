@@ -21,11 +21,14 @@
 #include <benchmark/benchmark.h>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
 #include <filesystem>
 #include <format>
 #include <fstream>
 #include <memory>
+#include <new>
 #include <sstream>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -295,10 +298,40 @@ void register_benchmarks() {
 	});
 }
 
+/// Whether the allocation counter sees an operator new call made here and one
+/// made inside the standard library. When it does not, the heap counters would
+/// read low without failing, so this prints the likely cause.
+bool allocation_counter_works() {
+	const spc::test::AllocationProbe probe;
+	void* block = ::operator new(64);
+	benchmark::DoNotOptimize(block);
+	::operator delete(block);
+	const std::uint64_t direct = probe.stats().allocations;
+	const std::runtime_error error("a message the standard library copies to the heap");
+	benchmark::DoNotOptimize(error.what());
+	const std::uint64_t library = probe.stats().allocations - direct;
+	if (direct != 1) {
+		std::fputs("The allocation counter misses operator new calls. Under Valgrind, run with "
+				   "--soname-synonyms=somalloc=nouserintercepts.\n",
+				   stderr);
+		return false;
+	}
+	if (library == 0) {
+		std::fputs("The allocation counter misses allocations made inside the standard library, "
+				   "which happens when LTO internalizes the replacement operator new.\n",
+				   stderr);
+		return false;
+	}
+	return true;
+}
+
 } // namespace
 
 int main(int argc, char** argv) {
 	benchmark::MaybeReenterWithoutASLR(argc, argv);
+	if (!allocation_counter_works()) {
+		return 1;
+	}
 	register_benchmarks();
 	benchmark::Initialize(&argc, argv);
 	if (benchmark::ReportUnrecognizedArguments(argc, argv)) {

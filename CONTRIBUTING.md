@@ -138,6 +138,10 @@ python3 build-bench/_deps/benchmark-src/tools/compare.py benchmarks \
   build-bench/main.json build-bench/branch.json
 ```
 
+Under Valgrind, pass `--soname-synonyms=somalloc=nouserintercepts`, or
+Valgrind's own operator new replaces the counting one and the suite exits
+with an error.
+
 ## Pull requests
 
 - Branch from `main` and open a pull request against it. Every CI job must
