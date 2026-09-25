@@ -76,19 +76,29 @@ jobs:
       - name: Build for arm64 and x86_64, macOS 13.4 and later
         run: >-
           cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPC_WARNINGS_AS_ERRORS=ON
-          -DCMAKE_OSX_DEPLOYMENT_TARGET=13.4 "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
+          -DSPC_BUILD_BENCHMARKS=ON -DCMAKE_OSX_DEPLOYMENT_TARGET=13.4
+          "-DCMAKE_OSX_ARCHITECTURES=arm64;x86_64"
       - run: cmake --build build --parallel
+      # One grep over a universal binary's otool output passes if either slice
+      # matches, so check each slice on its own.
       - name: Check both slices, the minimum macOS, and the system libcurl
         run: |
-          for f in build/src/libspc_*.a build/tests/spc_tests; do
-            lipo "$f" -verify_arch arm64 && lipo "$f" -verify_arch x86_64
+          for arch in arm64 x86_64; do
+            for f in build/src/libspc_*.a build/tests/spc_tests; do
+              lipo "$f" -verify_arch "$arch"
+            done
+            load=$(otool -arch "$arch" -l build/tests/spc_tests)
+            libs=$(otool -arch "$arch" -L build/tests/spc_tests)
+            grep -q 'minos 13.4$' <<<"$load"
+            grep -q '/usr/lib/libcurl.4.dylib ' <<<"$libs"
           done
-          otool -l build/tests/spc_tests | grep -q 'minos 13.4'
-          otool -L build/tests/spc_tests | grep -q /usr/lib/libcurl.4.dylib
       - name: Test the arm64 slice
         run: ctest --test-dir build --output-on-failure
       - name: Test the x86_64 slice under Rosetta 2
         run: arch -x86_64 build/tests/spc_tests
+      # The benchmarks' macOS-only memory counters build and run only here.
+      - name: Run each benchmark once
+        run: build/benchmarks/spc_benchmarks --benchmark_dry_run=true
       - name: Check installed and FetchContent consumers
         run: ./tools/test_consumers.sh
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
