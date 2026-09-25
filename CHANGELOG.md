@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-09-25
+
 ### Changed
 
 - `parse_storm_reports` sizes its list of reports once instead of growing it
