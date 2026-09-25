@@ -3,6 +3,7 @@
 /// setlocale(LC_ALL, "") (most Qt and GTK apps) get the user's locale, which
 /// may use a decimal comma or treat bytes above 0x7F as letters.
 
+#include "models/json.hpp"
 #include "spc/api.hpp"
 #include "spc/models/convective.hpp"
 #include "spc/models/fire_weather.hpp"
@@ -10,6 +11,8 @@
 #include "support/fixtures.hpp"
 
 #include <clocale>
+#include <cmath>
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
@@ -52,6 +55,43 @@ public:
 		return HttpResponse{200, R"({"features":[]})", {}};
 	}
 };
+
+TEST(LocaleIndependence, NumericStringsParseLikeFromCharsInEveryLocale) {
+	struct Case {
+		std::string_view text;
+		bool ok;
+		double value;
+		std::size_t consumed;
+	};
+	// std::from_chars results. "0x10" stops at the x: from_chars reads no hex,
+	// though a stream would.
+	const std::vector<Case> cases{
+		{"0.15", true, 0.15, 4},  {"5", true, 5.0, 1},		 {".5", true, 0.5, 2},
+		{"-.5", true, -0.5, 3},	  {"5.", true, 5.0, 2},		 {"1e3", true, 1000.0, 3},
+		{"12abc", true, 12.0, 2}, {"0x10", true, 0.0, 1},	 {"+1", false, 0.0, 0},
+		{" 1", false, 0.0, 0},	  {"", false, 0.0, 0},		 {"abc", false, 0.0, 0},
+		{"1e400", false, 0.0, 0}, {"1e-400", false, 0.0, 0}, {"1e-310", true, 1e-310, 6},
+		{"5e", true, 5.0, 1},
+	};
+	for (const char* name : {"C", "de_DE.UTF-8"}) {
+		const ScopedLocale locale{LC_ALL, name};
+		if (!locale.applied()) {
+			continue;
+		}
+		for (const Case& c : cases) {
+			const detail::ParsedNumber parsed = detail::parse_double(c.text);
+			EXPECT_EQ(parsed.ok, c.ok) << name << ": " << c.text;
+			if (c.ok) {
+				EXPECT_DOUBLE_EQ(parsed.value, c.value) << name << ": " << c.text;
+				EXPECT_EQ(parsed.consumed, c.consumed) << name << ": " << c.text;
+			}
+		}
+	}
+	const detail::ParsedNumber inf = detail::parse_double("inf");
+	EXPECT_TRUE(inf.ok && std::isinf(inf.value) && inf.consumed == 3);
+	const detail::ParsedNumber nan = detail::parse_double("nan");
+	EXPECT_TRUE(nan.ok && std::isnan(nan.value) && nan.consumed == 3);
+}
 
 TEST(LocaleIndependence, Day48StaticFeedKeepsItsProbabilityUnderACommaDecimalLocale) {
 	// The Day 4-8 feed's only probability is the string "0.15"; a

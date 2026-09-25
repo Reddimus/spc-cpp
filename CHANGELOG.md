@@ -13,6 +13,17 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   memory, since the list no longer keeps the spare room that growth leaves,
   and parsing allocates about 12% fewer bytes.
 
+### Fixed
+
+- Builds without floating-point `std::from_chars` (libc++ before 20, and
+  macOS targets before 26) parsed numeric strings such as probability labels
+  with a string stream, which disagreed with every other build. It read
+  `0x10` as 16 and rejected `12abc`, `inf`, `nan`, subnormals such as
+  `1e-310`, and a bare trailing exponent such as `5e`, so those fields became
+  0 on those builds. Every platform now uses the fast_float code that Glaze
+  already bundles, which also parses a number in about a tenth of the
+  stream's instructions.
+
 ## [0.4.1] - 2026-09-25
 
 ### Added

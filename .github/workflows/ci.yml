@@ -45,8 +45,7 @@ jobs:
       - name: Lint
         run: make lint
 
-  # libc++ 18 lacks floating-point std::from_chars, so this is the only job
-  # that runs the stream fallback in detail::parse_double.
+  # Clang 18 with libc++ 18, the oldest toolchain the README supports.
   build-linux-libcxx:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
