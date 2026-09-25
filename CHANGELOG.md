@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- An ArcGIS error object with code 503 was `ServerError`. It is now
+  `RateLimited`, the same as an HTTP 503 and as the README and `error.hpp`
+  say.
+
 ## [0.4.2] - 2026-09-25
 
 ### Changed
@@ -24,9 +30,9 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Builds without floating-point `std::from_chars` (libc++ before 20, and
   macOS targets before 26) parsed numeric strings such as probability labels
   with a string stream, which disagreed with every other build. It read
-  `0x10` as 16 and rejected `12abc`, `inf`, `nan`, subnormals such as
-  `1e-310`, and a bare trailing exponent such as `5e`, so those fields became
-  0 on those builds. Every platform now uses the fast_float code that Glaze
+  `0x10` as 16 and rejected `12abc`, subnormals such as `1e-310`, and a
+  bare trailing exponent such as `5e`, so those fields became 0 on those
+  builds. Every platform now uses the fast_float code that Glaze
   already bundles, which also parses a number in about a tenth of the
   stream's instructions.
 - The `parse_*` functions could read past the end of the `std::string_view`
