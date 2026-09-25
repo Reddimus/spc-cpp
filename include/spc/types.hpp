@@ -1,10 +1,6 @@
 /// @file types.hpp
-/// @brief Plain data types for SPC outlook ingestion.
-///
-/// EXTRACTED VERBATIM from spc-data/src/types.hpp (Workstream C). The only
-/// change is the namespace (`predictioncast::spc_data` -> `spc`). These are
-/// contract-stable shapes; downstream byte-identity depends on them being
-/// unchanged.
+/// @brief Day 1-3 convective outlook types. Their shape matches the internal
+/// spc-data service.
 
 #pragma once
 
@@ -20,23 +16,22 @@ struct LonLat {
 	double lat = 0.0;
 };
 
-/// One polygon (outer ring; SPC outlooks are single-ring polygons in practice).
+/// One polygon's outer ring. Holes are not kept.
 using Polygon = std::vector<LonLat>;
 
-/// One feature from a day-N categorical outlook GeoJSON.
-/// Classification values: MRGL (1), SLGT (2), ENH (3), MDT (4), HIGH (5).
+/// One categorical outlook band.
 struct OutlookFeature {
-	std::string label;			///< raw label from GeoJSON, e.g. "MRGL"
-	std::uint8_t severity = 0;	///< 1..5; 0 if unrecognized
-	std::vector<Polygon> rings; ///< all polygons in the MultiPolygon
+	std::string label;			///< raw label, e.g. "MRGL"
+	std::uint8_t severity = 0;	///< TSTM/MRGL 1, SLGT 2, ENH 3, MDT 4, HIGH 5; 0 if unknown
+	std::vector<Polygon> rings; ///< every polygon in the band
 	std::string issued_at;		///< ISO 8601
-	std::string valid_from;
-	std::string valid_until;
+	std::string valid_from;		///< ISO 8601
+	std::string valid_until;	///< ISO 8601
 };
 
-/// One probabilistic outlook feature (tornado/hail/wind percentage isopleth).
+/// One probabilistic isopleth (tornado, hail, wind, or day 3 severe).
 struct ProbOutlookFeature {
-	std::string hazard;		  ///< "tornado" | "hail" | "wind"
+	std::string hazard;		  ///< "tornado", "hail", "wind", or "severe"
 	double probability = 0.0; ///< [0, 1]
 	std::vector<Polygon> rings;
 	std::string issued_at;
@@ -44,13 +39,13 @@ struct ProbOutlookFeature {
 	std::string valid_until;
 };
 
-/// Parsed view of a single-day categorical outlook GeoJSON file.
+/// A day's categorical outlook.
 struct CategoricalOutlookPayload {
-	std::int32_t day_offset = 0; ///< 1..8
+	std::int32_t day_offset = 0; ///< 1..3
 	std::vector<OutlookFeature> features;
 };
 
-/// Parsed view of a single-day probabilistic outlook GeoJSON file.
+/// A day's probabilistic outlook for one hazard.
 struct ProbOutlookPayload {
 	std::int32_t day_offset = 0;
 	std::string hazard;

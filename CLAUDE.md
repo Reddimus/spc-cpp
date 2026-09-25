@@ -1,59 +1,58 @@
-# spc-cpp development guide
+# spc-cpp
 
-## Commands
+C++23 client for NOAA Storm Prediction Center data. `make help` lists the
+targets; CONTRIBUTING.md has the full check list and the macOS clang-tidy recipe.
+
+## Checks
+
+Run before calling work done. CI runs the same gates:
 
 ```bash
-make build
-make test
-make lint
-make fixtures-check   # fixture-provenance gate; CI fails on a stale SHA256SUMS
-make lint-md          # markdown-lint gate over **/*.md
-make test-consumers
-python3 tools/verify_arcgis_metadata.py  # live, opt-in
+make test && make lint && make lint-md && make fixtures-check && make test-consumers
 ```
 
-Use `-DSPC_ENABLE_SANITIZERS=ON` for ASan and UBSan. Use
-`-DSPC_ENABLE_THREAD_SANITIZER=ON` in a separate build for TSan. Use
-`-DSPC_ENABLE_CLANG_TIDY=ON` for the configured clang-tidy gate.
+`python3 tools/verify_arcgis_metadata.py` checks the live NOAA layer table. Run it
+when you touch ArcGIS layer ids; it needs the network.
 
 ## Architecture
 
-The static-library chain is `spc_core -> spc_http -> spc_models -> spc_api`.
-Consumers normally link `spc::spc`.
-
-All public failures return `Result<T>`, which aliases `std::expected<T,
-Error>`. High-level clients use `HttpClient` by default and accept a shared
-`HttpTransport` for custom networking and tests.
-
-Glaze 8.3 parses loose SPC JSON. GoogleTest 1.18 runs the unit suite.
+- Static libraries `spc_core -> spc_http -> spc_models -> spc_api`; consumers
+  link `spc::spc`.
+- Public failures return `Result<T>` (`std::expected<T, Error>`). The standalone
+  `parse_*` functions throw `std::runtime_error` on malformed JSON; the clients
+  turn that into `ErrorCode::ParseError`.
+- Glaze is private. It lives behind `src/models/json.hpp`, and no header under
+  `include/` may include it; `tools/test_consumers.sh` fails if an install
+  ships Glaze headers.
+- `HttpClient` is thread-safe through a pool of libcurl handles. Custom
+  transports implement `HttpTransport::get`, which must be safe to call
+  concurrently.
+- `include/spc/version.hpp` is the only place the version lives; CMake reads
+  it. A release also updates the README's `GIT_TAG` and
+  `find_package(spc X.Y REQUIRED)`, which `make test-consumers` checks.
 
 ## Invariants
 
-- Use C++23 and explicit types. `tools/cpp_auto_audit.py` enforces the narrow
-  exceptions for `auto`.
-- Follow `.clang-format`, use the `spc` namespace, and place project includes
-  before system includes.
-- Keep the convective parser aligned with the internal `spc-data` parser. Its
-  key-case, number conversion, and Polygon or MultiPolygon behavior are
-  compatibility requirements.
-- Give each new product its own label mapper. Fire weather and watch labels do
-  not use `severity_from_label`.
-- Test client behavior through `HttpTransport`. Unit tests must not require
-  NOAA or IEM access.
-- Treat `tests/fixtures/arcgis_layers_2026-09-03.json` as the ArcGIS routing
-  contract. Run the live metadata check when changing layer IDs.
-- Resolve SPC watch boxes through `ArchiveClient::watches()`. NOAA WWA polygons
-  have a different schema.
+- Spell out types; `tools/cpp_auto_audit.py` allows `auto` only for iterators,
+  structured bindings, and lambdas.
+- Keep the Day 1-3 parser output identical to the internal spc-data service:
+  key-case fallbacks, numeric strings, and outer rings only.
+- Give each product its own label mapper. Only categorical outlooks use
+  `severity_from_label`.
+- Test clients through `HttpTransport` or the loopback server in
+  `tests/support/`. Unit tests stay offline.
+- `tests/fixtures/arcgis_layers_2026-09-03.json` is the contract for `kLayers`
+  in `src/api/client.cpp`. Change them together.
+- Watches come from IEM (`ArchiveClient::watches()`); NOAA's WWA layer lacks
+  SPC's watch fields.
+- IEM's `lsr.geojson` filters by office with `wfos=`; it ignores `wfo=`.
+- After changing a fixture, regenerate `tests/fixtures/SHA256SUMS` (recipe in
+  CONTRIBUTING.md).
+- Docs and comments stay short: say why, leave history to git and the
+  changelog.
 
 ## Release
 
-The tag must match `project(spc-cpp VERSION ...)`. A `vX.Y.Z` tag triggers the
-release workflow, which reads the matching `CHANGELOG.md` section.
-
-The default `ClientConfig::user_agent` is generated from `PROJECT_VERSION` via
-`SPC_VERSION_STRING`, so a bump carries automatically for anything linking the
-targets, and `HttpClientLifecycle.DefaultUserAgentCarriesTheProjectVersion`
-fails if that stops being true. Also bump the `#ifndef SPC_VERSION_STRING`
-fallback literal in `include/spc/http_client.hpp`: it only applies to a
-consumer that includes the header without linking the target, so no test
-covers it.
+Squash-merge pull requests. A `vX.Y.Z` tag triggers `release.yml`, which checks
+the tag against `version.hpp`, runs the tests and consumer checks, and
+publishes the matching `CHANGELOG.md` section. Steps are in CONTRIBUTING.md.

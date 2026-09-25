@@ -1,7 +1,6 @@
-// Moved verbatim from spc-data/tests/test_parser.cpp (Workstream C).
-// Asserts are identical; only the include path + namespace changed. This
-// pins that the extracted convective parser is behavior-for-behavior the
-// spc-data parser.
+/// @file test_parser.cpp
+/// @brief Day 1-3 parser behavior shared with spc-data. The assertions match
+/// spc-data's own parser tests.
 
 #include "spc/models/outlook.hpp"
 
@@ -92,10 +91,8 @@ TEST(Parser, ProbabilisticTornado) {
 	EXPECT_DOUBLE_EQ(p.features[1].probability, 0.05);
 }
 
-// Regression: the live www.spc.noaa.gov + ArcGIS GeoJSON ship the probability
-// as an already-normalized fraction ("0.02", "0.30") — NOT an integer percent.
-// A bare `/ 100.0` turned a 2% risk into 0.0002. Both label forms must map to
-// the same [0,1] probability.
+// Live feeds send fractions ("0.02"); older ones sent percentages ("2").
+// Both must give the same probability.
 TEST(Parser, ProbabilisticFractionalLabel) {
 	const ProbOutlookPayload p = parse_probabilistic(R"({
 		"type": "FeatureCollection",

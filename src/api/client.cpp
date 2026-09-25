@@ -1,34 +1,41 @@
 /// @file client.cpp
-/// @brief StaticFeed / ArcGIS / Archive client implementations.
+/// @brief StaticFeedClient, ArcGISClient, and ArchiveClient.
 
+#include "models/json.hpp"
 #include "spc/api.hpp"
-#include "spc/models/common.hpp"
 #include "spc/pagination.hpp"
 #include "spc/rate_limit.hpp"
 #include "spc/retry.hpp"
 
 #include <array>
-#include <cctype>
 #include <chrono>
+#include <cstdint>
+#include <exception>
 #include <format>
+#include <iterator>
 #include <memory>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
+#include <vector>
 
 namespace spc {
 
 namespace {
 
-constexpr const char* kStaticBase = "https://www.spc.noaa.gov/products/outlook/";
-constexpr const char* kStaticDay48Base = "https://www.spc.noaa.gov/products/exper/day4-8/";
-constexpr const char* kArcGisOutlks =
+using detail::Json;
+
+constexpr std::string_view kStaticOutlookBase = "https://www.spc.noaa.gov/products/outlook/";
+constexpr std::string_view kStaticDay48Base = "https://www.spc.noaa.gov/products/exper/day4-8/";
+constexpr std::string_view kArcGisOutlooks =
 	"https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer";
-constexpr const char* kArcGisFirewx =
-	"https://mapservices.weather.noaa.gov/vector/rest/services/fire_weather/SPC_firewx/MapServer";
-constexpr const char* kArcGisMd = "https://mapservices.weather.noaa.gov/vector/rest/services/"
-								  "outlooks/spc_mesoscale_discussion/MapServer";
-constexpr const char* kIemBase = "https://mesonet.agron.iastate.edu/";
+constexpr std::string_view kArcGisFireWeather = "https://mapservices.weather.noaa.gov/vector/rest/"
+												"services/fire_weather/SPC_firewx/MapServer";
+constexpr std::string_view kArcGisMesoscale =
+	"https://mapservices.weather.noaa.gov/vector/rest/"
+	"services/outlooks/spc_mesoscale_discussion/MapServer";
+constexpr std::string_view kIemBase = "https://mesonet.agron.iastate.edu/";
 
 enum class LayerProduct : std::uint8_t {
 	Categorical,
@@ -45,6 +52,8 @@ struct LayerDescriptor {
 	std::string_view name;
 };
 
+// Layer ids and names as published on 2026-09-03; the live check in
+// tools/verify_arcgis_metadata.py compares them with NOAA's metadata.
 constexpr std::array<LayerDescriptor, 38> kLayers{{
 	{LayerProduct::Categorical, 1, "", 1, "Day 1 Categorical Outlook"},
 	{LayerProduct::ConditionalIntensity, 1, "tornado", 2, "Day 1 Tornado Conditional Intensity"},
@@ -97,6 +106,36 @@ const LayerDescriptor* find_layer(LayerProduct product, std::int32_t day,
 	return nullptr;
 }
 
+/// The Day 1-3 probability layer for `day` and `hazard`, or nullptr.
+const LayerDescriptor* day1_3_probability_layer(std::int32_t day, std::string_view hazard) {
+	return day <= 3 ? find_layer(LayerProduct::Probability, day, hazard) : nullptr;
+}
+
+Error unsupported_probability() {
+	return Error::invalid_request(
+		"probabilistic outlook requires tornado, hail, or wind on day 1 or 2, or severe on day 3");
+}
+
+/// The day's two fire-weather layers, in published order, or empty when the
+/// day has none.
+std::vector<const LayerDescriptor*> fire_weather_layers(std::int32_t day) {
+	std::vector<const LayerDescriptor*> layers;
+	for (const LayerDescriptor& descriptor : kLayers) {
+		if (descriptor.product == LayerProduct::FireWeather && descriptor.day == day) {
+			layers.push_back(&descriptor);
+		}
+	}
+	return layers;
+}
+
+FireWeatherLayer fire_weather_layer(std::string_view subtype) {
+	if (subtype == "outlook") {
+		return FireWeatherLayer::Outlook;
+	}
+	return subtype == "dry-thunderstorm" ? FireWeatherLayer::DryThunderstorm
+										 : FireWeatherLayer::WindLowHumidity;
+}
+
 std::shared_ptr<HttpTransport> usable_transport(std::shared_ptr<HttpTransport> transport) {
 	if (transport != nullptr) {
 		return transport;
@@ -104,20 +143,26 @@ std::shared_ptr<HttpTransport> usable_transport(std::shared_ptr<HttpTransport> t
 	return std::make_shared<HttpClient>();
 }
 
-std::string normalized_severe_hazard(std::int32_t day, const std::string& hazard) {
-	if (day == 3 && hazard == "any") {
-		return "severe";
-	}
-	return hazard;
+/// "any" is an older spelling of day 3's "severe".
+std::string_view normalized_hazard(std::int32_t day, std::string_view hazard) {
+	return day == 3 && hazard == "any" ? std::string_view{"severe"} : hazard;
+}
+
+/// RFC 3986 unreserved characters, spelled out: std::isalnum depends on the C
+/// locale and accepts bytes above 0x7F in UTF-8 locales on macOS.
+bool is_unreserved(unsigned char ch) noexcept {
+	return (ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9') ||
+		   ch == '-' || ch == '.' || ch == '_' || ch == '~';
 }
 
 std::string percent_encode(std::string_view value) {
-	constexpr char kHex[] = "0123456789ABCDEF";
+	constexpr std::string_view kHex = "0123456789ABCDEF";
 	std::string encoded;
 	encoded.reserve(value.size());
-	for (const unsigned char ch : value) {
-		if (std::isalnum(ch) != 0 || ch == '-' || ch == '.' || ch == '_' || ch == '~') {
-			encoded.push_back(static_cast<char>(ch));
+	for (const char c : value) {
+		const unsigned char ch = static_cast<unsigned char>(c);
+		if (is_unreserved(ch)) {
+			encoded.push_back(c);
 		} else {
 			encoded.push_back('%');
 			encoded.push_back(kHex[ch >> 4U]);
@@ -127,29 +172,31 @@ std::string percent_encode(std::string_view value) {
 	return encoded;
 }
 
-/// IEM is a courtesy third party, so the bucket stays small — but the wait
-/// must be bounded, or `RateLimiter::acquire()` blocks the caller's thread
-/// forever and the documented `ErrorCode::RateLimited` result is unreachable.
-RateLimiter::Config archive_rate_limit() {
-	RateLimiter::Config config;
-	config.max_wait = std::chrono::seconds{5};
-	return config;
-}
-
-const char* service_base(ArcGISService service) {
-	switch (service) {
-		case ArcGISService::Outlooks:
-			return kArcGisOutlks;
-		case ArcGISService::FireWeather:
-			return kArcGisFirewx;
-		case ArcGISService::MesoscaleDiscussions:
-			return kArcGisMd;
+/// Map a transport result to its body. `semantics` says what a 404 means for
+/// the feed that answered.
+Result<std::string> body_or_error(Result<HttpResponse> response, Feed404 semantics) {
+	if (!response) {
+		return std::unexpected(std::move(response.error()));
 	}
-	return kArcGisOutlks;
+	if (response->status_code == 200) {
+		return std::move(response->body);
+	}
+	return std::unexpected(Error::from_response(response->status_code, response->body, semantics));
 }
 
-/// What `paged()` needs from one ArcGIS response envelope: whether the server
-/// truncated the result, and how many records it actually returned.
+/// Run `parse` and turn its std::runtime_error into a ParseError.
+template <typename Parse>
+Result<std::invoke_result_t<const Parse&>> parsed(const Parse& parse) {
+	try {
+		return parse();
+	} catch (const std::exception& e) {
+		return std::unexpected(Error::parse(e.what()));
+	}
+}
+
+// ===== ArcGIS paging =====
+
+/// What paging needs from one ArcGIS response.
 struct ArcGISEnvelope {
 	std::int32_t feature_count{0};
 	bool exceeded_transfer_limit{false};
@@ -167,25 +214,20 @@ Result<ArcGISEnvelope> inspect_arcgis_envelope(const std::string& body) {
 	}
 	const Json* error = detail::lookup(*root, "error");
 	if (error != nullptr && error->is_object()) {
-		const double raw_code = detail::json_number_or_numeric_string(*error, "code");
-		const int code = raw_code > 0.0 ? static_cast<int>(raw_code) : 400;
-		// A logical ArcGIS failure travels over HTTP 200, so it must not go
-		// through the HTTP status mapper: an ArcGIS code 404 (renamed or
-		// retired service path) is a genuine NotFound, and a code like 1000
-		// is not an HTTP status at all.
-		return std::unexpected(Error::from_arcgis(code, body));
+		// ArcGIS reports failures with HTTP 200 and an error object.
+		const std::int32_t code =
+			detail::to_int32(detail::json_number_or_numeric_string(*error, "code")).value_or(0);
+		return std::unexpected(Error::from_arcgis(code > 0 ? code : 400, body));
 	}
 	ArcGISEnvelope envelope;
-	// Verified live against SPC_wx_outlks layer 1 with resultRecordCount=1:
-	// `f=json` carries the flag at the root, `f=geojson` carries it at the
-	// root AND under `properties`. Read both so either shape is honoured.
+	// f=json puts the flag at the root; f=geojson puts it at the root and
+	// under `properties`.
 	envelope.exceeded_transfer_limit = envelope_flag(*root, "exceededTransferLimit");
 	if (!envelope.exceeded_transfer_limit) {
 		const Json* properties = detail::lookup(*root, "properties");
 		envelope.exceeded_transfer_limit =
 			properties != nullptr && envelope_flag(*properties, "exceededTransferLimit");
 	}
-	// Esri (`f=json`) and GeoJSON (`f=geojson`) both name the array `features`.
 	const Json* features = detail::lookup(*root, "features");
 	if (features != nullptr && features->is_array()) {
 		envelope.feature_count = static_cast<std::int32_t>(features->get_array().size());
@@ -193,18 +235,48 @@ Result<ArcGISEnvelope> inspect_arcgis_envelope(const std::string& body) {
 	return envelope;
 }
 
-/// Map HTTP status to the right error; only a real body is handed to the
-/// parser. `semantics` is the trust boundary: only the SPC static feeds may
-/// read a 404 as "no active outlook" (FeedUnavailable). For every other host
-/// a 404 is a retired or wrong URL, i.e. NotFound.
-Result<std::string> body_or_error(Result<HttpResponse> r, Feed404 semantics) {
-	if (!r) {
-		return std::unexpected(r.error());
+bool is_json_format(std::string_view format) {
+	return format == "json" || format == "pjson" || format == "geojson";
+}
+
+/// One ArcGIS layer query.
+struct LayerQuery {
+	std::string_view service;
+	std::int32_t layer{0};
+	QueryParams params;
+	/// Output spatial reference, e.g. "4326"; empty keeps the layer's own.
+	std::string_view out_spatial_reference;
+};
+
+std::string page_url(const LayerQuery& query, const ArcGISPager& pager) {
+	const QueryParams& p = query.params;
+	std::string url =
+		std::format("{}/{}/query?where={}&outFields={}&returnGeometry={}&f={}&resultOffset={}"
+					"&resultRecordCount={}",
+					query.service, query.layer, percent_encode(p.where),
+					percent_encode(p.out_fields), p.return_geometry ? "true" : "false",
+					percent_encode(p.f), pager.offset(), pager.page_size());
+	if (!p.order_by_fields.empty()) {
+		url += "&orderByFields=" + percent_encode(p.order_by_fields);
 	}
-	if (r->status_code == 200) {
-		return std::move(r->body);
+	if (!p.geometry.empty()) {
+		url += std::format("&geometry={}&geometryType={}&spatialRel={}", percent_encode(p.geometry),
+						   percent_encode(p.geometry_type), percent_encode(p.spatial_rel));
 	}
-	return std::unexpected(Error::from_response(r->status_code, r->body, semantics));
+	if (!query.out_spatial_reference.empty()) {
+		url += "&outSR=" + percent_encode(query.out_spatial_reference);
+	}
+	return url;
+}
+
+/// A query for one of the SDK's own products: every feature, ordered by
+/// `objectid` (present on all NOAA SPC layers) so pages stay stable.
+LayerQuery product_layer(std::string_view service, std::int32_t layer,
+						 std::string_view format = "json") {
+	LayerQuery query{service, layer, {}, {}};
+	query.params.f = format;
+	query.params.order_by_fields = "objectid";
+	return query;
 }
 
 } // namespace
@@ -214,81 +286,67 @@ Result<std::string> body_or_error(Result<HttpResponse> r, Feed404 semantics) {
 struct StaticFeedClient::Impl {
 	std::shared_ptr<HttpTransport> http;
 	RetryPolicy retry;
-	explicit Impl(ClientConfig cfg) : http(std::make_shared<HttpClient>(std::move(cfg))) {}
+
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
 		: http(usable_transport(std::move(transport))) {}
+
+	/// GET `url`; a 404 means SPC has not issued the product.
+	[[nodiscard]] Result<std::string> fetch(const std::string& url) const {
+		return body_or_error(with_retry([&] { return http->get(url); }, retry),
+							 Feed404::NoActiveOutlook);
+	}
 };
 
 StaticFeedClient::StaticFeedClient(ClientConfig config)
-	: impl_(std::make_unique<Impl>(std::move(config))) {}
+	: impl_(std::make_unique<Impl>(std::make_shared<HttpClient>(std::move(config)))) {}
 StaticFeedClient::StaticFeedClient(std::shared_ptr<HttpTransport> transport)
 	: impl_(std::make_unique<Impl>(std::move(transport))) {}
 StaticFeedClient::~StaticFeedClient() = default;
 StaticFeedClient::StaticFeedClient(StaticFeedClient&&) noexcept = default;
 StaticFeedClient& StaticFeedClient::operator=(StaticFeedClient&&) noexcept = default;
 
-Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t day) {
+Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t day) const {
 	if (day < 1 || day > 3) {
 		return std::unexpected(
 			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
 	}
-	const std::string url = std::format("{}day{}otlk_cat.nolyr.geojson", kStaticBase, day);
-	Result<std::string> body = body_or_error(
-		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
+	const Result<std::string> body =
+		impl_->fetch(std::format("{}day{}otlk_cat.nolyr.geojson", kStaticOutlookBase, day));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
-	try {
-		return parse_categorical(*body, day);
-	} catch (const std::exception& e) {
-		return std::unexpected(Error::parse(e.what()));
-	}
+	return parsed([&] { return parse_categorical(*body, day); });
 }
 
 Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
-															   const std::string& hazard) {
-	const std::string normalized = normalized_severe_hazard(day, hazard);
-	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, normalized);
-	if (descriptor == nullptr || day > 3) {
-		return std::unexpected(
-			Error::invalid_request("probabilistic outlook requires tornado, hail, or wind on day 1 "
-								   "or 2, or severe on day 3"));
+															   std::string_view hazard) const {
+	const std::string_view normalized = normalized_hazard(day, hazard);
+	if (day1_3_probability_layer(day, normalized) == nullptr) {
+		return std::unexpected(unsupported_probability());
 	}
-	std::string tag = normalized;
-	if (normalized == "tornado") {
-		tag = "torn";
-	}
-	const std::string filename = day == 3 ? "day3otlk_prob.nolyr.geojson"
-										  : std::format("day{}otlk_{}.nolyr.geojson", day, tag);
-	const std::string url = std::string{kStaticBase} + filename;
-	Result<std::string> body = body_or_error(
-		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
+	// SPC names the files day1otlk_torn, day2otlk_hail, ..., and day3otlk_prob.
+	const std::string_view tag = normalized == "tornado" ? std::string_view{"torn"} : normalized;
+	const std::string url =
+		day == 3 ? std::format("{}day3otlk_prob.nolyr.geojson", kStaticOutlookBase)
+				 : std::format("{}day{}otlk_{}.nolyr.geojson", kStaticOutlookBase, day, tag);
+	const Result<std::string> body = impl_->fetch(url);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
-	try {
-		return parse_probabilistic(*body, day, normalized);
-	} catch (const std::exception& e) {
-		return std::unexpected(Error::parse(e.what()));
-	}
+	return parsed([&] { return parse_probabilistic(*body, day, std::string{normalized}); });
 }
 
-Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
+Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) const {
 	if (day < 4 || day > 8) {
 		return std::unexpected(
 			Error::invalid_request("extended outlook day must be between 4 and 8"));
 	}
-	const std::string url = std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day);
-	Result<std::string> body = body_or_error(
-		with_retry([&] { return impl_->http->get(url); }, impl_->retry), Feed404::NoActiveOutlook);
+	const Result<std::string> body =
+		impl_->fetch(std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day));
 	if (!body) {
 		return std::unexpected(body.error());
 	}
-	try {
-		return parse_day4_8(*body, day);
-	} catch (const std::exception& e) {
-		return std::unexpected(Error::parse(e.what()));
-	}
+	return parsed([&] { return parse_day4_8(*body, day); });
 }
 
 // ===================== ArcGISClient =====================
@@ -296,32 +354,19 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) {
 struct ArcGISClient::Impl {
 	std::shared_ptr<HttpTransport> http;
 	RetryPolicy retry;
-	explicit Impl(ClientConfig cfg) : http(std::make_shared<HttpClient>(std::move(cfg))) {}
+
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
 		: http(usable_transport(std::move(transport))) {}
 
-	/// One paged query. Concatenated raw page bodies are returned; the
-	/// ArcGISPager advances on `exceededTransferLimit`.
-	Result<std::vector<std::string>> paged(const char* base, std::int32_t layer,
-										   const QueryParams& p,
-										   std::string_view out_spatial_reference = {}) {
-		std::vector<std::string> pages;
+	/// Fetch every page of `query`, handing each body to `on_page` as it
+	/// arrives. A 404 is NotFound: ArcGIS reports an empty product as HTTP
+	/// 200 with no features.
+	template <typename OnPage>
+		requires std::is_invocable_r_v<Result<void>, const OnPage&, std::string&&>
+	[[nodiscard]] Result<void> paged(const LayerQuery& query, const OnPage& on_page) const {
 		ArcGISPager pager;
 		while (pager.has_more()) {
-			std::string url =
-				std::format("{}/{}/query?where={}&outFields={}&returnGeometry={}&f={}"
-							"&resultOffset={}&resultRecordCount={}",
-							base, layer, percent_encode(p.where), percent_encode(p.out_fields),
-							p.return_geometry ? "true" : "false", percent_encode(p.f),
-							pager.offset(), pager.page_size());
-			if (!p.geometry.empty()) {
-				url += std::format("&geometry={}&geometryType={}&spatialRel={}",
-								   percent_encode(p.geometry), percent_encode(p.geometry_type),
-								   percent_encode(p.spatial_rel));
-			}
-			if (!out_spatial_reference.empty()) {
-				url += "&outSR=" + percent_encode(out_spatial_reference);
-			}
+			const std::string url = page_url(query, pager);
 			Result<std::string> body =
 				body_or_error(with_retry([&] { return http->get(url); }, retry), Feed404::NotFound);
 			if (!body) {
@@ -332,91 +377,93 @@ struct ArcGISClient::Impl {
 				return std::unexpected(envelope.error());
 			}
 			if (envelope->exceeded_transfer_limit && envelope->feature_count == 0) {
-				// The offset would never move: paging cannot converge.
+				// The offset would never move.
 				return std::unexpected(
 					Error::server("ArcGIS reported a truncated page containing no records"));
 			}
-			pages.push_back(std::move(*body));
+			Result<void> accepted = on_page(std::move(*body));
+			if (!accepted) {
+				return accepted;
+			}
 			pager.advance(envelope->feature_count, envelope->exceeded_transfer_limit);
 		}
 		if (pager.page_limit_reached()) {
 			return std::unexpected(Error::server(
 				std::format("ArcGIS paging did not converge within {} pages", pager.max_pages())));
 		}
-		return pages;
+		return {};
+	}
+
+	/// Page through `query`, parse each page with `parse`, and move the
+	/// page's `items` into `payload`. Peak memory is one page plus the result.
+	template <typename Payload, typename Item, typename Parse>
+	[[nodiscard]] Result<Payload> paged_into(const LayerQuery& query, Payload payload,
+											 std::vector<Item> Payload::*items,
+											 const Parse& parse) const {
+		Result<void> done = paged(query, [&](const std::string& body) -> Result<void> {
+			Result<Payload> page = parsed([&] { return parse(std::string_view{body}); });
+			if (!page) {
+				return std::unexpected(std::move(page.error()));
+			}
+			std::vector<Item>& target = payload.*items;
+			std::vector<Item>& source = (*page).*items;
+			if (target.empty()) {
+				target = std::move(source);
+			} else {
+				target.insert(target.end(), std::make_move_iterator(source.begin()),
+							  std::make_move_iterator(source.end()));
+			}
+			return {};
+		});
+		if (!done) {
+			return std::unexpected(std::move(done.error()));
+		}
+		return payload;
 	}
 };
 
 ArcGISClient::ArcGISClient(ClientConfig config)
-	: impl_(std::make_unique<Impl>(std::move(config))) {}
+	: impl_(std::make_unique<Impl>(std::make_shared<HttpClient>(std::move(config)))) {}
 ArcGISClient::ArcGISClient(std::shared_ptr<HttpTransport> transport)
 	: impl_(std::make_unique<Impl>(std::move(transport))) {}
 ArcGISClient::~ArcGISClient() = default;
 ArcGISClient::ArcGISClient(ArcGISClient&&) noexcept = default;
 ArcGISClient& ArcGISClient::operator=(ArcGISClient&&) noexcept = default;
 
-Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t day) {
+Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t day) const {
 	const LayerDescriptor* descriptor = find_layer(LayerProduct::Categorical, day, "");
 	if (descriptor == nullptr) {
 		return std::unexpected(
 			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
 	}
-	QueryParams p;
-	// Request GeoJSON so the VERBATIM parse_categorical (a GeoJSON-only
-	// walker, parity-critical) consumes it unchanged. parse_esri_rings is
-	// proven equivalent (test_arcgis) but the convective path must stay
-	// byte-for-byte the spc-data parser, so we feed it its native shape.
-	p.f = "geojson";
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, p);
-	if (!pages) {
-		return std::unexpected(pages.error());
-	}
-	CategoricalOutlookPayload out;
-	out.day_offset = day;
-	for (const std::string& body : *pages) {
-		try {
-			CategoricalOutlookPayload pg = parse_categorical(body, day);
-			out.features.insert(out.features.end(), pg.features.begin(), pg.features.end());
-		} catch (const std::exception& e) {
-			return std::unexpected(Error::parse(e.what()));
-		}
-	}
-	return out;
+	CategoricalOutlookPayload seed;
+	seed.day_offset = day;
+	// GeoJSON, the shape the spc-data categorical parser reads.
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
+							 std::move(seed), &CategoricalOutlookPayload::features,
+							 [day](std::string_view body) { return parse_categorical(body, day); });
 }
 
 Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
-															 const std::string& hazard) {
-	const std::string normalized = normalized_severe_hazard(day, hazard);
-	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, normalized);
-	if (descriptor == nullptr || day > 3) {
-		return std::unexpected(
-			Error::invalid_request("probabilistic outlook requires tornado, hail, or wind on day 1 "
-								   "or 2, or severe on day 3"));
+															 std::string_view hazard) const {
+	const std::string_view normalized = normalized_hazard(day, hazard);
+	const LayerDescriptor* descriptor = day1_3_probability_layer(day, normalized);
+	if (descriptor == nullptr) {
+		return std::unexpected(unsupported_probability());
 	}
-	QueryParams p;
-	// GeoJSON for the verbatim parse_probabilistic (see query_categorical).
-	p.f = "geojson";
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, p);
-	if (!pages) {
-		return std::unexpected(pages.error());
-	}
-	ProbOutlookPayload out;
-	out.day_offset = day;
-	out.hazard = normalized;
-	for (const std::string& body : *pages) {
-		try {
-			ProbOutlookPayload pg = parse_probabilistic(body, day, normalized);
-			out.features.insert(out.features.end(), pg.features.begin(), pg.features.end());
-		} catch (const std::exception& e) {
-			return std::unexpected(Error::parse(e.what()));
-		}
-	}
-	return out;
+	ProbOutlookPayload seed;
+	seed.day_offset = day;
+	seed.hazard = normalized;
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
+							 std::move(seed), &ProbOutlookPayload::features,
+							 [day, hazard = std::string{normalized}](std::string_view body) {
+								 return parse_probabilistic(body, day, hazard);
+							 });
 }
 
 Result<ConditionalIntensityPayload>
-ArcGISClient::query_conditional_intensity(std::int32_t day, const std::string& hazard) {
-	const std::string normalized = normalized_severe_hazard(day, hazard);
+ArcGISClient::query_conditional_intensity(std::int32_t day, std::string_view hazard) const {
+	const std::string_view normalized = normalized_hazard(day, hazard);
 	const LayerDescriptor* descriptor =
 		find_layer(LayerProduct::ConditionalIntensity, day, normalized);
 	if (descriptor == nullptr) {
@@ -424,224 +471,176 @@ ArcGISClient::query_conditional_intensity(std::int32_t day, const std::string& h
 			Error::invalid_request("conditional intensity requires tornado, hail, or wind on day 1 "
 								   "or 2, or severe on day 3"));
 	}
-	QueryParams params;
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, params);
-	if (!pages) {
-		return std::unexpected(pages.error());
-	}
-	ConditionalIntensityPayload output;
-	output.day = day;
-	output.hazard = normalized;
-	for (const std::string& body : *pages) {
-		try {
-			ConditionalIntensityPayload page = parse_conditional_intensity(body, day, normalized);
-			output.features.insert(output.features.end(), page.features.begin(),
-								   page.features.end());
-		} catch (const std::exception& e) {
-			return std::unexpected(Error::parse(e.what()));
-		}
-	}
-	return output;
+	ConditionalIntensityPayload seed;
+	seed.day = day;
+	seed.hazard = normalized;
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
+							 &ConditionalIntensityPayload::features,
+							 [day, hazard = std::string{normalized}](std::string_view body) {
+								 return parse_conditional_intensity(body, day, hazard);
+							 });
 }
 
-Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) {
+Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) const {
 	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, "severe");
 	if (descriptor == nullptr || day < 4) {
 		return std::unexpected(
 			Error::invalid_request("extended outlook day must be between 4 and 8"));
 	}
-	QueryParams params;
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisOutlks, descriptor->id, params);
-	if (!pages) {
-		return std::unexpected(pages.error());
+	Day48OutlookPayload seed;
+	seed.day = day;
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
+							 &Day48OutlookPayload::features,
+							 [day](std::string_view body) { return parse_day4_8(body, day); });
+}
+
+Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) const {
+	const std::vector<const LayerDescriptor*> layers = fire_weather_layers(day);
+	if (layers.empty()) {
+		return std::unexpected(
+			Error::invalid_request("fire-weather outlook day must be between 1 and 8"));
 	}
-	Day48OutlookPayload output;
-	output.day = day;
-	for (const std::string& body : *pages) {
-		try {
-			Day48OutlookPayload page = parse_day4_8(body, day);
-			output.features.insert(output.features.end(), page.features.begin(),
-								   page.features.end());
-		} catch (const std::exception& e) {
-			return std::unexpected(Error::parse(e.what()));
+	FireWeatherPayload payload;
+	payload.day = day;
+	for (const LayerDescriptor* descriptor : layers) {
+		const FireWeatherLayer layer = fire_weather_layer(descriptor->subtype);
+		LayerQuery query = product_layer(kArcGisFireWeather, descriptor->id);
+		// These layers default to Web Mercator; ask for lon/lat.
+		query.out_spatial_reference = "4326";
+		Result<FireWeatherPayload> merged = impl_->paged_into(
+			query, std::move(payload), &FireWeatherPayload::features,
+			[day, layer](std::string_view body) { return parse_fire_weather(body, day, layer); });
+		if (!merged) {
+			return merged;
 		}
+		payload = std::move(*merged);
 	}
-	return output;
+	return payload;
 }
 
-Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) {
-	FireWeatherPayload out;
-	out.day = day;
-	const std::array<std::string_view, 2> subtypes =
-		day <= 2 ? std::array<std::string_view, 2>{"outlook", "dry-thunderstorm"}
-				 : std::array<std::string_view, 2>{"dry-thunderstorm", "wind-low-humidity"};
-	for (const std::string_view subtype : subtypes) {
-		const LayerDescriptor* descriptor = find_layer(LayerProduct::FireWeather, day, subtype);
-		if (descriptor == nullptr) {
-			return std::unexpected(
-				Error::invalid_request("fire-weather outlook day must be between 1 and 8"));
-		}
-		// Fire-weather layers default to Web Mercator. The public model uses
-		// longitude/latitude, so ask ArcGIS to transform geometry before parsing.
-		Result<std::vector<std::string>> pages =
-			impl_->paged(kArcGisFirewx, descriptor->id, {}, "4326");
-		if (!pages) {
-			return std::unexpected(pages.error());
-		}
-		for (const std::string& body : *pages) {
-			try {
-				FireWeatherLayer layer = FireWeatherLayer::WindLowHumidity;
-				if (subtype == "outlook") {
-					layer = FireWeatherLayer::Outlook;
-				} else if (subtype == "dry-thunderstorm") {
-					layer = FireWeatherLayer::DryThunderstorm;
-				}
-				FireWeatherPayload page = parse_fire_weather(body, day, layer);
-				out.features.insert(out.features.end(), page.features.begin(), page.features.end());
-			} catch (const std::exception& e) {
-				return std::unexpected(Error::parse(e.what()));
-			}
-		}
-	}
-	return out;
+Result<MesoscalePayload> ArcGISClient::query_active_md() const {
+	return impl_->paged_into(
+		product_layer(kArcGisMesoscale, 0), MesoscalePayload{}, &MesoscalePayload::discussions,
+		[](std::string_view body) { return parse_mesoscale_discussions(body); });
 }
 
-Result<WatchPayload> ArcGISClient::query_active_watches() {
-	return std::unexpected(Error::invalid_request(
-		"NOAA WWA polygons omit SPC watch parameters; use ArchiveClient::watches()"));
-}
-
-Result<MesoscalePayload> ArcGISClient::query_active_md() {
-	QueryParams p;
-	Result<std::vector<std::string>> pages = impl_->paged(kArcGisMd, 0, p);
-	if (!pages) {
-		return std::unexpected(pages.error());
-	}
-	MesoscalePayload out;
-	for (const std::string& body : *pages) {
-		try {
-			MesoscalePayload pg = parse_mesoscale_discussions(body);
-			out.discussions.insert(out.discussions.end(), pg.discussions.begin(),
-								   pg.discussions.end());
-		} catch (const std::exception& e) {
-			return std::unexpected(Error::parse(e.what()));
-		}
-	}
-	return out;
-}
-
-Result<StormReportPayload> ArcGISClient::query_storm_reports() {
-	// SPC storm reports are best sourced from IEM (ArchiveClient); the
-	// MapServer has no LSR layer. Surface a clear error so callers route to
-	// ArchiveClient instead of silently returning empty.
-	return std::unexpected(
-		Error::invalid_request("storm reports are served by ArchiveClient (IEM), not the "
-							   "SPC ArcGIS MapServer"));
-}
-
-Result<std::vector<std::string>> ArcGISClient::query_layer(std::int32_t layer_id,
-														   const QueryParams& params) {
-	return query_layer(ArcGISService::Outlooks, layer_id, params);
-}
-
-Result<std::vector<std::string>>
-ArcGISClient::query_layer(ArcGISService service, std::int32_t layer_id, const QueryParams& params) {
+Result<std::vector<std::string>> ArcGISClient::query_layer(ArcGISService service,
+														   std::int32_t layer_id,
+														   const QueryParams& params) const {
 	if (layer_id < 0) {
 		return std::unexpected(Error::invalid_request("ArcGIS layer id must be non-negative"));
 	}
-	return impl_->paged(service_base(service), layer_id, params);
+	if (!is_json_format(params.f)) {
+		return std::unexpected(
+			Error::invalid_request("QueryParams::f must be json, pjson, or geojson"));
+	}
+	std::string_view base = kArcGisOutlooks;
+	switch (service) {
+		case ArcGISService::Outlooks:
+			break;
+		case ArcGISService::FireWeather:
+			base = kArcGisFireWeather;
+			break;
+		case ArcGISService::MesoscaleDiscussions:
+			base = kArcGisMesoscale;
+			break;
+	}
+	std::vector<std::string> pages;
+	Result<void> done = impl_->paged(LayerQuery{base, layer_id, params, {}},
+									 [&pages](std::string&& body) -> Result<void> {
+										 pages.push_back(std::move(body));
+										 return {};
+									 });
+	if (!done) {
+		return std::unexpected(std::move(done.error()));
+	}
+	return pages;
 }
 
 // ===================== ArchiveClient =====================
 
+namespace {
+
+/// IEM is a courtesy service: back off slowly.
+RetryPolicy archive_retry_policy() {
+	RetryPolicy policy;
+	policy.max_attempts = 4;
+	policy.initial_delay = std::chrono::milliseconds{500};
+	return policy;
+}
+
+/// Small bucket, and a bounded wait so a busy caller gets
+/// `ErrorCode::RateLimited` instead of blocking indefinitely.
+RateLimiter::Config archive_rate_limit() {
+	RateLimiter::Config config;
+	config.max_wait = std::chrono::seconds{5};
+	return config;
+}
+
+} // namespace
+
 struct ArchiveClient::Impl {
 	std::shared_ptr<HttpTransport> http;
-	RetryPolicy retry;
-	RateLimiter limiter;
-
-	explicit Impl(ClientConfig cfg)
-		: http(std::make_shared<HttpClient>(std::move(cfg))), retry([] {
-			  // Conservative: IEM is a courtesy third party.
-			  RetryPolicy r;
-			  r.max_attempts = 4;
-			  r.initial_delay = std::chrono::milliseconds{500};
-			  return r;
-		  }()),
-		  limiter(archive_rate_limit()) {}
+	RetryPolicy retry{archive_retry_policy()};
+	mutable RateLimiter limiter{archive_rate_limit()};
 
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
-		: http(usable_transport(std::move(transport))), retry([] {
-			  RetryPolicy policy;
-			  policy.max_attempts = 4;
-			  policy.initial_delay = std::chrono::milliseconds{500};
-			  return policy;
-		  }()),
-		  limiter(archive_rate_limit()) {}
+		: http(usable_transport(std::move(transport))) {}
 
-	/// Pay a token per *attempt*, not per call: `with_retry` re-issues the
-	/// request up to `max_attempts` times, and it retries precisely on
-	/// 429/503 — the responses in which IEM is asking for less traffic.
-	/// Acquiring once outside the retry loop undercounted the budget by 4x.
-	Result<HttpResponse> rate_limited_get(const std::string& url) {
-		return with_retry(
-			[&]() -> Result<HttpResponse> {
-				if (!limiter.acquire()) {
-					return std::unexpected(Error::rate_limited("IEM rate limit"));
-				}
-				return http->get(url);
-			},
-			retry);
+	/// GET with one rate-limit token per attempt, retries included: retries
+	/// happen on 429/503, exactly when IEM wants less traffic.
+	[[nodiscard]] Result<std::string> fetch(const std::string& url) const {
+		return body_or_error(with_retry(
+								 [&]() -> Result<HttpResponse> {
+									 if (!limiter.acquire()) {
+										 return std::unexpected(
+											 Error::rate_limited("IEM rate limit"));
+									 }
+									 return http->get(url);
+								 },
+								 retry),
+							 Feed404::NotFound);
 	}
 };
 
 ArchiveClient::ArchiveClient(ClientConfig config)
-	: impl_(std::make_unique<Impl>(std::move(config))) {}
+	: impl_(std::make_unique<Impl>(std::make_shared<HttpClient>(std::move(config)))) {}
 ArchiveClient::ArchiveClient(std::shared_ptr<HttpTransport> transport)
 	: impl_(std::make_unique<Impl>(std::move(transport))) {}
 ArchiveClient::~ArchiveClient() = default;
 ArchiveClient::ArchiveClient(ArchiveClient&&) noexcept = default;
 ArchiveClient& ArchiveClient::operator=(ArchiveClient&&) noexcept = default;
 
-Result<WatchPayload> ArchiveClient::watches(const std::string& ts) {
-	// `ts` is caller-supplied and reaches a query string, so it is encoded
-	// like every ArcGIS query value: an unencoded '&' would inject a
-	// parameter and an unencoded '+' would decode server-side as a space.
+Result<WatchPayload> ArchiveClient::watches(std::string_view timestamp) const {
 	std::string url = std::format("{}json/spcwatch.py", kIemBase);
-	if (!ts.empty()) {
-		url += "?ts=" + percent_encode(ts);
+	if (!timestamp.empty()) {
+		url += "?ts=" + percent_encode(timestamp);
 	}
-	Result<std::string> body = body_or_error(impl_->rate_limited_get(url), Feed404::NotFound);
+	const Result<std::string> body = impl_->fetch(url);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
-	try {
-		return parse_watches(*body);
-	} catch (const std::exception& e) {
-		return std::unexpected(Error::parse(e.what()));
-	}
+	return parsed([&] { return parse_watches(*body); });
 }
 
+// A start/end pair cannot be told apart by type.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
-Result<StormReportPayload> ArchiveClient::storm_reports(const std::string& start_iso,
-														const std::string& end_iso,
-														const std::string& wfo) {
-	// api.hpp documents these as ISO 8601, which permits a "+HH:MM" offset; a
-	// raw '+' decodes server-side as a space and silently shifts the window.
+Result<StormReportPayload> ArchiveClient::storm_reports(std::string_view start_iso,
+														std::string_view end_iso,
+														std::string_view wfo) const {
+	// NOLINTEND(bugprone-easily-swappable-parameters)
+	// Encode every value: an ISO offset's '+' would otherwise decode as a space.
 	std::string url = std::format("{}geojson/lsr.geojson?sts={}&ets={}", kIemBase,
 								  percent_encode(start_iso), percent_encode(end_iso));
 	if (!wfo.empty()) {
-		url += "&wfo=" + percent_encode(wfo);
+		// IEM filters on `wfos`; it silently ignores `wfo` here.
+		url += "&wfos=" + percent_encode(wfo);
 	}
-	Result<std::string> body = body_or_error(impl_->rate_limited_get(url), Feed404::NotFound);
+	const Result<std::string> body = impl_->fetch(url);
 	if (!body) {
 		return std::unexpected(body.error());
 	}
-	try {
-		return parse_storm_reports(*body);
-	} catch (const std::exception& e) {
-		return std::unexpected(Error::parse(e.what()));
-	}
+	return parsed([&] { return parse_storm_reports(*body); });
 }
-// NOLINTEND(bugprone-easily-swappable-parameters)
 
 } // namespace spc

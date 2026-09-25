@@ -1,22 +1,14 @@
-/// @file common.cpp
-/// @brief SPC GeoJSON null-safe helpers — Glaze-backed.
-///
-/// Bodies copied VERBATIM from spc-data/src/parser.cpp:28-152. The
-/// case-variant-key / numeric-as-string / Polygon-vs-MultiPolygon semantics
-/// are exactly the production spc-data behavior; do not "improve" them — a
-/// downstream byte-identity gate depends on this code path being unchanged.
+#include "models/json.hpp"
 
-#include "spc/models/common.hpp"
-
+#include <cmath>
 #include <format>
+#include <limits>
+#include <stdexcept>
+#include <utility>
 
-// Floating-point std::from_chars is the locale-independent parse the standard
-// intends, but libc++ only implements it from version 20 (the project's own
-// clang-tidy job builds against libc++ 18, where the overload is deleted).
-// libstdc++ and MSVC advertise it through __cpp_lib_to_chars; libc++ does not
-// define that macro at all, so fall back to its version.
-// Definable on the command line to exercise the fallback on a toolchain that
-// has from_chars.
+// libc++ implements floating-point std::from_chars only from version 20 and
+// does not define __cpp_lib_to_chars, so check its version directly. Define
+// SPC_HAS_FP_FROM_CHARS=0 on the command line to test the stream fallback.
 #ifndef SPC_HAS_FP_FROM_CHARS
 #if defined(__cpp_lib_to_chars) && __cpp_lib_to_chars >= 201611L
 #define SPC_HAS_FP_FROM_CHARS 1
@@ -35,10 +27,7 @@
 #include <sstream>
 #endif
 
-namespace spc {
-namespace detail {
-
-// ===== glz::generic null-safe extractors (verbatim from spc-data) =====
+namespace spc::detail {
 
 const Json* lookup(const Json& obj, const char* key) {
 	if (!obj.is_object()) {
@@ -68,9 +57,8 @@ ParsedNumber parse_double(std::string_view text) {
 	if (text.empty()) {
 		return parsed;
 	}
-	// Gate the leading character so both implementations below agree on what
-	// they accept: from_chars takes '-', a digit, '.', or inf/nan, and never
-	// leading whitespace or '+'.
+	// Both implementations below must accept the same leading characters:
+	// '-', '.', a digit, or the start of inf/nan.
 	const char first = text.front();
 	const bool leading_ok = first == '-' || first == '.' || (first >= '0' && first <= '9') ||
 							first == 'i' || first == 'I' || first == 'n' || first == 'N';
@@ -107,8 +95,6 @@ ParsedNumber parse_double(std::string_view text) {
 #endif
 }
 
-/// SPC ships `LABEL` as either a string ("SLGT", "5") or a number (5). Always
-/// returns a numeric view; non-numeric / missing yields 0.
 double json_number_or_numeric_string(const Json& obj, const char* key) {
 	const Json* v = lookup(obj, key);
 	if (v == nullptr || v->is_null()) {
@@ -118,9 +104,7 @@ double json_number_or_numeric_string(const Json& obj, const char* key) {
 		return v->get<double>();
 	}
 	if (v->is_string()) {
-		// Was std::stod, whose strtod honours LC_NUMERIC; see parse_double.
-		// Byte-identical to a C-locale stod for every value in the fixture
-		// corpus, which is what the spc-data byte-identity gate covers.
+		// Matches a C-locale std::stod for every value SPC publishes.
 		const ParsedNumber parsed = parse_double(v->get<std::string>());
 		return parsed.ok ? parsed.value : 0.0;
 	}
@@ -139,14 +123,11 @@ double normalized_probability(const Json& obj) {
 	return normalized >= 0.0 && normalized <= 1.0 ? normalized : 0.0;
 }
 
-/// Convert SPC's compact "YYYYMMDDHHMM" timestamp to ISO 8601
-/// "YYYY-MM-DDTHH:MM:00Z". Returns the input unchanged if the format doesn't
-/// match.
 std::string spc_ts_to_iso8601(std::string_view spc_ts) {
 	if (spc_ts.size() != 12) {
 		return std::string{spc_ts};
 	}
-	for (char c : spc_ts) {
+	for (const char c : spc_ts) {
 		if (c < '0' || c > '9') {
 			return std::string{spc_ts};
 		}
@@ -159,8 +140,6 @@ std::string as_spc_ts(const Json& j, const char* key) {
 	return spc_ts_to_iso8601(json_string(j, key));
 }
 
-/// Parse either a `Polygon` or a `MultiPolygon` geometry into a list of rings.
-/// Both shapes collapse to our `std::vector<Polygon>` representation.
 std::vector<Polygon> parse_rings(const Json& geom) {
 	std::vector<Polygon> out;
 	if (!geom.is_object()) {
@@ -209,15 +188,12 @@ std::vector<Polygon> parse_rings(const Json& geom) {
 	return out;
 }
 
-// ===== net-new: ArcGIS Esri-rings adapter (NOT the verbatim path) =====
-
 double ring_signed_area(const Polygon& ring) {
-	// Shoelace. Sign indicates orientation; magnitude is 2*area.
-	double sum = 0.0;
 	const std::size_t n = ring.size();
 	if (n < 3) {
 		return 0.0;
 	}
+	double sum = 0.0;
 	for (std::size_t i = 0, j = n - 1; i < n; j = i++) {
 		sum += (ring[j].lon * ring[i].lat) - (ring[i].lon * ring[j].lat);
 	}
@@ -251,36 +227,63 @@ std::vector<Polygon> parse_esri_rings(const Json& geom) {
 				r.push_back({pt_arr[0].get<double>(), pt_arr[1].get<double>()});
 			}
 		}
-		if (r.empty()) {
+		// Counter-clockwise (positive area in lon/lat) is an Esri hole.
+		if (r.empty() || ring_signed_area(r) > 0.0) {
 			continue;
-		}
-		// Parity with the verbatim GeoJSON `parse_rings`, which keeps only the
-		// OUTER ring of each polygon (coordinates[0] / poly[0]) and discards
-		// holes. Esri flattens outer + hole rings into one list distinguished
-		// by winding: clockwise == outer, counter-clockwise == hole. In
-		// lon/lat the shoelace signed area is NEGATIVE for clockwise. Keep
-		// outer rings (area <= 0); drop counter-clockwise hole rings so the
-		// Polygon set matches the GeoJSON path exactly.
-		if (ring_signed_area(r) > 0.0) {
-			continue; // counter-clockwise -> hole -> dropped (matches GeoJSON)
 		}
 		out.push_back(std::move(r));
 	}
 	return out;
 }
 
-/// Parse the top-level JSON body into a glz::generic. Returns the formatted
-/// error message on malformed JSON; the public parse_* wrappers turn that
-/// into the std::runtime_error the spc-data main.cpp catches (preserving the
-/// pre-migration nlohmann::json::parse contract).
 glz::expected<Json, std::string> parse_root(std::string_view body) {
 	Json root{};
-	glz::error_ctx ec = glz::read_json(root, body);
+	const glz::error_ctx ec = glz::read_json(root, body);
 	if (ec) {
 		return glz::unexpected(glz::format_error(ec, body));
 	}
 	return root;
 }
 
-} // namespace detail
-} // namespace spc
+Json parse_root_or_throw(std::string_view body) {
+	glz::expected<Json, std::string> root = parse_root(body);
+	if (!root) {
+		throw std::runtime_error(root.error());
+	}
+	return std::move(*root);
+}
+
+const Json* feature_fields(const Json& feature) {
+	const Json* properties = lookup(feature, "properties");
+	return properties != nullptr ? properties : lookup(feature, "attributes");
+}
+
+std::vector<Polygon> feature_rings(const Json& geometry) {
+	return lookup(geometry, "rings") != nullptr ? parse_esri_rings(geometry)
+												: parse_rings(geometry);
+}
+
+std::string first_string(const Json& obj, std::initializer_list<const char*> keys) {
+	for (const char* key : keys) {
+		std::string value = json_string(obj, key);
+		if (!value.empty()) {
+			return value;
+		}
+	}
+	return {};
+}
+
+std::string first_timestamp(const Json& obj, std::initializer_list<const char*> keys) {
+	return spc_ts_to_iso8601(first_string(obj, keys));
+}
+
+std::optional<std::int32_t> to_int32(double value) noexcept {
+	constexpr double kMin = std::numeric_limits<std::int32_t>::min();
+	constexpr double kMax = std::numeric_limits<std::int32_t>::max();
+	if (!std::isfinite(value) || value < kMin || value > kMax) {
+		return std::nullopt;
+	}
+	return static_cast<std::int32_t>(value);
+}
+
+} // namespace spc::detail

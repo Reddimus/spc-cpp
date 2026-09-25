@@ -39,7 +39,7 @@ DisableFormat: false
 FixNamespaceComments: true
 IncludeBlocks: Regroup
 IncludeCategories:
-  - Regex: '^"spc/'
+  - Regex: '^"'
     Priority: 1
   - Regex: '^<'
     Priority: 2
@@ -73,4 +73,4 @@ SpacesInCStyleCastParentheses: false
 SpacesInContainerLiterals: true
 SpacesInParentheses: false
 SpacesInSquareBrackets: false
-Standard: c++20
+Standard: Latest

@@ -1,3 +1,6 @@
+/// @file error.hpp
+/// @brief Error type and `Result<T>`, returned by every fallible SDK call.
+
 #pragma once
 
 #include <cstdint>
@@ -7,29 +10,30 @@
 
 namespace spc {
 
-/// Error codes for SPC SDK operations.
 enum class ErrorCode {
 	Ok = 0,
+	/// Connection, TLS, or timeout failure.
 	NetworkError,
+	/// HTTP 429 or 503, or the SDK's own rate limit.
 	RateLimited,
+	/// HTTP 5xx, or an ArcGIS query that never finished paging.
 	ServerError,
-	/// A genuine fault: a bad URL, a retired product, a renamed MapServer
-	/// path, or a wrong ArcGIS layer id. Every 404 that is not an SPC static
-	/// feed lands here — including a logical ArcGIS `{"error":{"code":404}}`
-	/// envelope, which is how a retired MapServer path is reported.
+	/// A real fault: a bad URL, a retired product, or a wrong ArcGIS layer.
 	NotFound,
-	/// SPC returns HTTP 404 for "no active outlook" (e.g. overnight day-1
-	/// probabilistic). This is a normal, expected state — distinct from a
-	/// genuine `NotFound` (bad URL / retired product). Consumers treat it as
-	/// "clear the rows for this day/hazard", not as an error. Only
-	/// `StaticFeedClient` produces it: see `Feed404`.
+	/// SPC has not issued this product right now; its static feeds answer
+	/// HTTP 404. This is normal (day 1 probabilities overnight, for example),
+	/// so treat it as "no data", not as a failure. Only `StaticFeedClient`
+	/// returns it.
 	FeedUnavailable,
+	/// The request cannot succeed as asked: an unsupported day or hazard,
+	/// HTTP 400, an ArcGIS error such as an invalid parameter, or a response
+	/// larger than `ClientConfig::max_response_bytes`.
 	InvalidRequest,
+	/// The response was not the expected JSON.
 	ParseError,
 	Unknown
 };
 
-/// Convert ErrorCode to string.
 [[nodiscard]] constexpr std::string_view to_string(ErrorCode code) noexcept {
 	switch (code) {
 		case ErrorCode::Ok:
@@ -54,35 +58,29 @@ enum class ErrorCode {
 	return "Unknown";
 }
 
-/// How a transport-level HTTP 404 is to be read for the feed that answered.
-///
-/// `Error::from_response` cannot tell a "no active outlook" 404 from a
-/// retired endpoint by looking at the status alone, so the caller — which
-/// knows which host it addressed — states the semantics explicitly.
+/// What an HTTP 404 means for the feed that returned it. The status alone
+/// cannot tell "nothing issued" from "wrong URL", but the caller knows which
+/// feed it asked.
 enum class Feed404 : std::uint8_t {
-	/// A 404 is a fault (bad URL / retired product) -> `ErrorCode::NotFound`.
-	/// The safe default: every feed except the SPC static products.
+	/// The URL is wrong or retired: `ErrorCode::NotFound`. The default.
 	NotFound,
-	/// SPC's static `.nolyr.geojson` products answer 404 with an HTML page
-	/// when nothing is issued -> `ErrorCode::FeedUnavailable`.
+	/// SPC's static products 404 when nothing is issued:
+	/// `ErrorCode::FeedUnavailable`.
 	NoActiveOutlook,
 };
 
-/// Error information returned by SDK operations.
 struct Error {
-	ErrorCode code;
+	ErrorCode code{ErrorCode::Unknown};
 	std::string message;
-	/// Transport HTTP status. For a logical ArcGIS failure (reported over
-	/// HTTP 200) this carries the ArcGIS error code when that code is in the
-	/// 100..599 HTTP range, and 0 otherwise — ArcGIS also uses codes such as
-	/// 1000 that are not HTTP statuses. See `from_arcgis`.
+	/// HTTP status, or 0. For an ArcGIS error (sent with HTTP 200) this is the
+	/// ArcGIS code when it lies in 100..599.
 	int http_status{0};
+	/// Extra context, such as ArcGIS error details or "arcgisCode=1000".
 	std::string detail;
 
 	[[nodiscard]] constexpr bool is_ok() const noexcept { return code == ErrorCode::Ok; }
 
-	/// True for SPC's "no active outlook" 404 — callers branch on this to
-	/// clear the corresponding rows instead of surfacing an error.
+	/// True when SPC has not issued the product: no data, not a failure.
 	[[nodiscard]] constexpr bool is_feed_unavailable() const noexcept {
 		return code == ErrorCode::FeedUnavailable;
 	}
@@ -117,22 +115,18 @@ struct Error {
 		return {ErrorCode::InvalidRequest, std::move(msg), 0, ""};
 	}
 
-	/// Create an Error from an HTTP response status code and body.
-	///
-	/// `semantics` decides what a 404 means for the feed that answered:
-	/// `Feed404::NoActiveOutlook` (SPC static products only) yields
-	/// `FeedUnavailable`; the default `Feed404::NotFound` yields `NotFound`.
+	/// An Error for a non-200 HTTP response. `semantics` says what a 404
+	/// means for the feed that answered.
 	[[nodiscard]] static Error from_response(int status, const std::string& body,
 											 Feed404 semantics = Feed404::NotFound);
 
-	/// Create an Error from an ArcGIS logical failure envelope
-	/// (`{"error":{"code":...,"message":...}}`), which the MapServer reports
-	/// over HTTP 200. A code of 404 — how a renamed or retired service path
-	/// is reported — is a genuine `NotFound`, never `FeedUnavailable`.
+	/// An Error for an ArcGIS `{"error":{"code":...}}` body, which the
+	/// MapServer sends with HTTP 200. Code 404 (a retired service) is
+	/// `NotFound`.
 	[[nodiscard]] static Error from_arcgis(int arcgis_code, const std::string& body);
 };
 
-/// Result type for SDK operations.
+/// The value, or the Error that prevented it.
 template <typename T>
 using Result = std::expected<T, Error>;
 

@@ -1,3 +1,2 @@
-# Repo-owned exceptions for the explicit local-type policy.
-# Format: relative/path.cpp|line snippet
-# Empty by design — net-new parsers spell out types or mark `// auto-ok`.
+# Exceptions to the explicit-type rule, one per line:
+# relative/path.cpp|line snippet

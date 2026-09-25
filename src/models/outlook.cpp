@@ -1,38 +1,19 @@
 /// @file outlook.cpp
-/// @brief SPC convective GeoJSON parsers, Glaze-backed.
+/// @brief Day 1-3 categorical and probabilistic parsers.
 ///
-/// `severity_from_label`, `parse_categorical`, `parse_probabilistic` are
-/// copied VERBATIM from spc-data/src/parser.cpp:156-268. The only mechanical
-/// change is the helper namespace (`detail::` instead of the anonymous
-/// namespace inside the old parser.cpp) and that `detail::parse_root` now
-/// returns `glz::expected` — this wrapper re-throws std::runtime_error on a
-/// malformed body to preserve the exact spc-data contract that the service's
-/// main.cpp catches. Parse output is byte-identical to spc-data. Do not
-/// change behavior here — the downstream byte-identity gate depends on it.
+/// These match the internal spc-data parser output for output. Change them
+/// only together with spc-data.
 
 #include "spc/models/outlook.hpp"
 
-#include "spc/models/common.hpp"
+#include "models/json.hpp"
 
-#include <stdexcept>
 #include <string>
 #include <utility>
 
 namespace spc {
 
-namespace {
-
-/// VERBATIM equivalent of spc-data parser.cpp's `parse_root`: throws
-/// std::runtime_error on malformed JSON (the contract main.cpp relies on).
-Json parse_root_or_throw(std::string_view body) {
-	glz::expected<Json, std::string> root = detail::parse_root(body);
-	if (!root) {
-		throw std::runtime_error(root.error());
-	}
-	return std::move(*root);
-}
-
-} // namespace
+using detail::Json;
 
 std::uint8_t severity_from_label(std::string_view label) noexcept {
 	if (label == "TSTM") {
@@ -57,7 +38,7 @@ std::uint8_t severity_from_label(std::string_view label) noexcept {
 }
 
 CategoricalOutlookPayload parse_categorical(std::string_view body, std::int32_t day_offset) {
-	const Json root = parse_root_or_throw(body);
+	const Json root = detail::parse_root_or_throw(body);
 	CategoricalOutlookPayload payload;
 	payload.day_offset = day_offset;
 	const Json* features_node = detail::lookup(root, "features");
@@ -100,10 +81,11 @@ CategoricalOutlookPayload parse_categorical(std::string_view body, std::int32_t 
 	return payload;
 }
 
-ProbOutlookPayload parse_probabilistic(
-	std::string_view body, std::int32_t day_offset,
-	std::string hazard) { // NOLINT(performance-unnecessary-value-param): parity signature
-	const Json root = parse_root_or_throw(body);
+// The by-value `hazard` matches spc-data's signature.
+ProbOutlookPayload
+parse_probabilistic(std::string_view body, std::int32_t day_offset,
+					std::string hazard) { // NOLINT(performance-unnecessary-value-param)
+	const Json root = detail::parse_root_or_throw(body);
 	ProbOutlookPayload payload;
 	payload.day_offset = day_offset;
 	payload.hazard = hazard;
@@ -119,14 +101,7 @@ ProbOutlookPayload parse_probabilistic(
 		}
 		ProbOutlookFeature pf;
 		pf.hazard = hazard;
-		// SPC prob isopleths express the risk percentage two incompatible ways
-		// depending on the source: as an integer-percent (`LABEL`/`dn` = "2",
-		// "5", "30") or as an already-normalized fraction (`LABEL` = "0.02",
-		// "0.05", "0.30" — the form the live www.spc.noaa.gov + ArcGIS GeoJSON
-		// actually ship). Normalize like the day4-8 path (convective.cpp): only
-		// values > 1 are percents to divide by 100; fractions pass through. A
-		// bare `/ 100.0` here silently produced 100x-too-small probabilities
-		// (0.02 -> 0.0002) for every real feed.
+		// Feeds publish either a percentage ("5") or a fraction ("0.05").
 		pf.probability = detail::normalized_probability(*props);
 		pf.issued_at = detail::as_spc_ts(*props, "ISSUE");
 		if (pf.issued_at.empty()) {

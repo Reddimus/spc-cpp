@@ -1,26 +1,26 @@
 /// @file static_feed.cpp
-/// @brief Fetch the Day-1 categorical outlook via the static-feed fallback.
+/// @brief Day 1 categorical outlook from SPC's static GeoJSON feed.
 
 #include "spc/spc.hpp"
 
 #include <iostream>
 
 int main() {
-	spc::StaticFeedClient client;
-	spc::Result<spc::CategoricalOutlookPayload> r = client.day_categorical(1);
-	if (!r) {
-		if (r.error().is_feed_unavailable()) {
-			std::cout << "Day-1 categorical: no active outlook (SPC 404 — normal)\n";
+	const spc::StaticFeedClient client;
+	const spc::Result<spc::CategoricalOutlookPayload> outlook = client.day_categorical(1);
+	if (!outlook) {
+		if (outlook.error().is_feed_unavailable()) {
+			std::cout << "No day 1 outlook is issued right now.\n";
 			return 0;
 		}
-		std::cerr << "error: " << r.error().message << "\n";
+		std::cerr << "error: " << outlook.error().message << "\n";
 		return 1;
 	}
-	std::cout << "Day-1 categorical: " << r->features.size() << " feature(s)\n";
-	for (const spc::OutlookFeature& f : r->features) {
-		std::cout << "  " << f.label << " (severity " << static_cast<int>(f.severity)
-				  << ") rings=" << f.rings.size() << " valid " << f.valid_from << " -> "
-				  << f.valid_until << "\n";
+	std::cout << "Day 1 categorical: " << outlook->features.size() << " band(s)\n";
+	for (const spc::OutlookFeature& band : outlook->features) {
+		std::cout << "  " << band.label << " (severity " << static_cast<int>(band.severity) << "), "
+				  << band.rings.size() << " polygon(s), valid " << band.valid_from << " to "
+				  << band.valid_until << "\n";
 	}
 	return 0;
 }

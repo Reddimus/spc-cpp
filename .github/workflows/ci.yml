@@ -6,137 +6,146 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Least privilege by default. The workflow runs on pull_request, and
-# consumer-smoke plus the FetchContent builds clone and execute third-party
-# code, so no job should inherit a writable token. A job that needs more grants
-# itself a narrower block.
+# Jobs build third-party code fetched at configure time, so none of them gets a
+# writable token. They use the runner image's CMake; Ubuntu's packaged 3.28 is
+# older than the 3.31 Glaze requires.
 permissions:
   contents: read
+
+# A new push to a pull request cancels its older run; runs on main always finish.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   build-linux:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake pkg-config clang-format \
-            libcurl4-openssl-dev locales
-          # The LocaleIndependence tests need a comma-decimal locale; without
-          # one they GTEST_SKIP and the regression they guard goes unchecked.
+            build-essential clang-format libcurl4-openssl-dev locales
+          # The locale tests skip without a comma-decimal locale.
           sudo locale-gen de_DE.UTF-8
-
       - name: Build
         run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
-
       - name: Test
         run: make test
-
-      - name: Verify fixture provenance
+      - name: Verify fixture checksums
         run: make fixtures-check
-
       - name: Lint
         run: make lint
+
+  # libc++ 18 lacks floating-point std::from_chars, so this is the only job
+  # that runs the stream fallback in detail::parse_double.
+  build-linux-libcxx:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential clang-18 libc++-18-dev libc++abi-18-dev \
+            libcurl4-openssl-dev locales
+          sudo locale-gen de_DE.UTF-8
+      - name: Build
+        run: >-
+          make build CMAKE_ARGS="-DCMAKE_CXX_COMPILER=clang++-18
+          -DCMAKE_CXX_FLAGS=-stdlib=libc++ -DSPC_WARNINGS_AS_ERRORS=ON"
+      - name: Test
+        run: make test
 
   build-macos:
     runs-on: macos-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-
+      # Formatting is checked once, in build-linux: clang-format output
+      # differs between major versions, and Homebrew ships the newest.
       - name: Install dependencies
         run: |
-          brew install pkg-config curl clang-format
+          brew install curl
           echo "CMAKE_PREFIX_PATH=$(brew --prefix curl)" >> "$GITHUB_ENV"
-
       - name: Build
         run: make build CMAKE_ARGS=-DSPC_WARNINGS_AS_ERRORS=ON
-
       - name: Test
         run: make test
 
-      - name: Lint
-        run: make lint
-
   markdown-lint:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: DavidAnson/markdownlint-cli2-action@ded1f9488f68a970bc66ea5619e13e9b52e601cd # v23
+      - uses: DavidAnson/markdownlint-cli2-action@21c1be1b93ad9ed58fa840aacc3f279cde2a72ff # v24.2.0
 
   sanitizer:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev locales
           sudo locale-gen de_DE.UTF-8
-      - name: Build with address and undefined behavior sanitizers
+      - name: Build with AddressSanitizer and UndefinedBehaviorSanitizer
         run: >-
-          cmake -S . -B build-sanitized
-          -DCMAKE_BUILD_TYPE=Debug
-          -DSPC_ENABLE_LTO=OFF
-          -DSPC_ENABLE_SANITIZERS=ON
-          -DSPC_BUILD_EXAMPLES=OFF
+          cmake -S . -B build-sanitized -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_SANITIZERS=ON -DSPC_BUILD_EXAMPLES=OFF
       - run: cmake --build build-sanitized --parallel
       - run: ctest --test-dir build-sanitized --output-on-failure
+        env:
+          UBSAN_OPTIONS: halt_on_error=1:print_stacktrace=1
 
   thread-sanitizer:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build with ThreadSanitizer
         run: >-
-          cmake -S . -B build-thread-sanitized
-          -DCMAKE_BUILD_TYPE=Debug
-          -DSPC_ENABLE_LTO=OFF
-          -DSPC_ENABLE_THREAD_SANITIZER=ON
-          -DSPC_BUILD_EXAMPLES=OFF
+          cmake -S . -B build-thread-sanitized -DCMAKE_BUILD_TYPE=Debug
+          -DSPC_ENABLE_THREAD_SANITIZER=ON -DSPC_BUILD_EXAMPLES=OFF
       - run: cmake --build build-thread-sanitized --parallel
       - run: ctest --test-dir build-thread-sanitized --output-on-failure
 
   clang-tidy:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang-18 clang-tidy-18 cmake \
+            build-essential clang-18 clang-tidy-18 \
             libc++-18-dev libc++abi-18-dev libcurl4-openssl-dev
-      - name: Run clang-tidy while compiling
+      - name: Compile the libraries with clang-tidy
         run: >-
-          cmake -S . -B build-tidy
-          -DCMAKE_BUILD_TYPE=Debug
-          -DCMAKE_CXX_COMPILER=clang++-18
+          make tidy CMAKE_ARGS="-DCMAKE_CXX_COMPILER=clang++-18
           -DCMAKE_CXX_FLAGS=-stdlib=libc++
-          -DSPC_ENABLE_CLANG_TIDY=ON
-          -DSPC_CLANG_TIDY_EXECUTABLE=/usr/bin/clang-tidy-18
-          -DSPC_ENABLE_LTO=OFF
-          -DSPC_BUILD_TESTS=OFF
-          -DSPC_BUILD_EXAMPLES=OFF
-      - run: cmake --build build-tidy --parallel
+          -DSPC_CLANG_TIDY_EXECUTABLE=/usr/bin/clang-tidy-18"
 
   consumer-smoke:
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Install dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev locales
-          sudo locale-gen de_DE.UTF-8
+            build-essential libcurl4-openssl-dev
       - run: ./tools/test_consumers.sh

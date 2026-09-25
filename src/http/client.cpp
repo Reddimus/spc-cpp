@@ -1,54 +1,62 @@
 #include "spc/http_client.hpp"
 
+#include <array>
+#include <cstddef>
 #include <curl/curl.h>
+#include <memory>
+#include <mutex>
 #include <string>
 #include <utility>
+#include <vector>
+
+#if !CURL_AT_LEAST_VERSION(7, 85, 0)
+#error "spc-cpp needs libcurl 7.85.0 or newer for CURLOPT_PROTOCOLS_STR"
+#endif
 
 namespace spc {
 
 namespace {
 
-/// Accumulates the body, refusing to grow past a ceiling. Returning a short
-/// count makes libcurl abort the transfer with CURLE_WRITE_ERROR.
+/// Idle handles kept for reuse. More can be open at once; extras are closed
+/// when their request finishes.
+constexpr std::size_t kMaxIdleHandles = 8;
+
+/// What `config()` reports on a moved-from client.
+const ClientConfig kMovedFromConfig{};
+
+/// Collects the body up to a ceiling. Returning a short count from the write
+/// callback makes libcurl abort with CURLE_WRITE_ERROR.
 struct BodySink {
 	std::string body;
 	std::size_t limit{0};
 	bool overflowed{false};
+	bool failed{false};
 };
 
-std::size_t write_cb(char* ptr, std::size_t size, std::size_t nmemb, void* user) {
+// libcurl is C, so no exception may leave this callback.
+std::size_t write_body(char* data, std::size_t size, std::size_t count, void* user) noexcept {
 	BodySink* sink = static_cast<BodySink*>(user);
-	const std::size_t chunk = size * nmemb;
-	if (sink->limit > 0 && sink->body.size() + chunk > sink->limit) {
+	const std::size_t chunk = size * count;
+	if (sink->limit > 0 && chunk > sink->limit - sink->body.size()) {
 		sink->overflowed = true;
 		return 0;
 	}
-	sink->body.append(ptr, chunk);
-	return chunk;
-}
-
-std::size_t header_cb(char* buffer, std::size_t size, std::size_t nitems, void* userdata) {
-	std::vector<std::pair<std::string, std::string>>* headers =
-		static_cast<std::vector<std::pair<std::string, std::string>>*>(userdata);
-	std::string line(buffer, size * nitems);
-	std::size_t colon = line.find(':');
-	if (colon != std::string::npos) {
-		std::string key = line.substr(0, colon);
-		std::string value = line.substr(colon + 1);
-		std::size_t start = value.find_first_not_of(" \t\r\n");
-		std::size_t end = value.find_last_not_of(" \t\r\n");
-		if (start != std::string::npos && end != std::string::npos) {
-			value = value.substr(start, end - start + 1);
-		}
-		headers->emplace_back(std::move(key), std::move(value));
+	try {
+		sink->body.append(data, chunk);
+	} catch (...) {
+		sink->failed = true;
+		return 0;
 	}
-	return size * nitems;
+	return chunk;
 }
 
 bool is_absolute_url(std::string_view path) {
 	return path.starts_with("http://") || path.starts_with("https://");
 }
 
+/// libcurl's process-wide state. Each client holds a shared reference, so the
+/// global cleanup runs only after the last handle is gone, whatever order
+/// static objects are destroyed in.
 class CurlRuntime {
 public:
 	CurlRuntime() : status_(curl_global_init(CURL_GLOBAL_DEFAULT)) {}
@@ -57,9 +65,10 @@ public:
 			curl_global_cleanup();
 		}
 	}
-
 	CurlRuntime(const CurlRuntime&) = delete;
 	CurlRuntime& operator=(const CurlRuntime&) = delete;
+	CurlRuntime(CurlRuntime&&) = delete;
+	CurlRuntime& operator=(CurlRuntime&&) = delete;
 
 	[[nodiscard]] CURLcode status() const noexcept { return status_; }
 
@@ -67,35 +76,134 @@ private:
 	CURLcode status_;
 };
 
-CurlRuntime& curl_runtime() {
-	// Function-local static initialization is thread-safe. Keep libcurl's
-	// process-wide state alive until normal process shutdown.
-	static CurlRuntime runtime;
+std::shared_ptr<const CurlRuntime> curl_runtime() {
+	static const std::shared_ptr<const CurlRuntime> runtime = std::make_shared<const CurlRuntime>();
 	return runtime;
+}
+
+/// One easy handle and the error buffer libcurl writes into. They are pooled
+/// together, so the buffer lives as long as the handle.
+struct Connection {
+	CURL* curl{curl_easy_init()};
+	std::array<char, CURL_ERROR_SIZE> errors{};
+
+	Connection() = default;
+	~Connection() {
+		if (curl != nullptr) {
+			curl_easy_cleanup(curl);
+		}
+	}
+	Connection(const Connection&) = delete;
+	Connection& operator=(const Connection&) = delete;
+	Connection(Connection&&) = delete;
+	Connection& operator=(Connection&&) = delete;
+};
+
+/// The final response's headers. Redirect hops, 1xx responses, and trailers
+/// are left out.
+std::vector<std::pair<std::string, std::string>> final_headers(CURL* curl) {
+	std::vector<std::pair<std::string, std::string>> headers;
+	curl_header* previous = nullptr;
+	while (curl_header* header = curl_easy_nextheader(curl, CURLH_HEADER, -1, previous)) {
+		headers.emplace_back(header->name, header->value);
+		previous = header;
+	}
+	return headers;
+}
+
+Result<HttpResponse> perform(Connection& connection, const std::string& url,
+							 const ClientConfig& config) {
+	CURL* curl = connection.curl;
+	curl_easy_reset(curl);
+	connection.errors.fill('\0');
+
+	// Refuse to send anything unless the restrictions actually took effect;
+	// an older runtime libcurl rejects CURLOPT_PROTOCOLS_STR and would then
+	// happily read file:// URLs.
+	const long verify = config.verify_ssl ? 1L : 0L;
+	const bool configured =
+		curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
+		curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https") == CURLE_OK &&
+		curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https") == CURLE_OK &&
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verify) == CURLE_OK &&
+		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verify * 2L) == CURLE_OK;
+	if (!configured) {
+		return std::unexpected(Error::network("libcurl rejected a required transport option"));
+	}
+
+	BodySink sink;
+	sink.limit = config.max_response_bytes;
+	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, connection.errors.data());
+	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &write_body);
+	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
+	curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(config.timeout.count()));
+	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
+	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
+	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
+	curl_easy_setopt(curl, CURLOPT_USERAGENT, config.user_agent.c_str());
+	curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
+	if (sink.limit > 0) {
+		// Lets libcurl refuse early when Content-Length is already too big.
+		curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(sink.limit));
+	}
+
+	const CURLcode rc = curl_easy_perform(curl);
+	// Not a NetworkError: retrying would download the same body again.
+	if (sink.overflowed || rc == CURLE_FILESIZE_EXCEEDED) {
+		return std::unexpected(
+			Error::invalid_request("response exceeded ClientConfig::max_response_bytes"));
+	}
+	if (sink.failed) {
+		return std::unexpected(Error::network("out of memory while reading the response"));
+	}
+	if (rc != CURLE_OK) {
+		const bool detailed = connection.errors.front() != '\0';
+		return std::unexpected(
+			Error::network(detailed ? connection.errors.data() : curl_easy_strerror(rc)));
+	}
+
+	long status = 0;
+	if (curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status) != CURLE_OK) {
+		return std::unexpected(Error::network("libcurl did not report a status code"));
+	}
+	return HttpResponse{
+		static_cast<std::int16_t>(status),
+		std::move(sink.body),
+		final_headers(curl),
+	};
 }
 
 } // namespace
 
 struct HttpClient::Impl {
+	// First member, so it is destroyed last.
+	std::shared_ptr<const CurlRuntime> runtime{curl_runtime()};
 	ClientConfig config;
-	CURL* curl{nullptr};
-	CURLcode global_status{CURLE_OK};
+	std::mutex mutex;
+	std::vector<std::unique_ptr<Connection>> idle; // guarded by mutex
 
-	explicit Impl(ClientConfig cfg) : config(std::move(cfg)) {
-		global_status = curl_runtime().status();
-		if (global_status == CURLE_OK) {
-			curl = curl_easy_init();
+	explicit Impl(ClientConfig cfg) : config(std::move(cfg)) { idle.reserve(kMaxIdleHandles); }
+
+	/// An idle connection, or a new one. Never waits for other requests.
+	std::unique_ptr<Connection> checkout() {
+		{
+			const std::lock_guard<std::mutex> lock(mutex);
+			if (!idle.empty()) {
+				std::unique_ptr<Connection> connection = std::move(idle.back());
+				idle.pop_back();
+				return connection;
+			}
 		}
+		return std::make_unique<Connection>();
 	}
 
-	~Impl() {
-		if (curl != nullptr) {
-			curl_easy_cleanup(curl);
+	/// Keep the connection for reuse, or close it when the pool is full.
+	void checkin(std::unique_ptr<Connection> connection) {
+		const std::lock_guard<std::mutex> lock(mutex);
+		if (idle.size() < kMaxIdleHandles) {
+			idle.push_back(std::move(connection)); // capacity is reserved
 		}
 	}
-
-	Impl(const Impl&) = delete;
-	Impl& operator=(const Impl&) = delete;
 };
 
 HttpClient::HttpClient(ClientConfig config) : impl_(std::make_unique<Impl>(std::move(config))) {}
@@ -105,61 +213,28 @@ HttpClient::HttpClient(HttpClient&&) noexcept = default;
 HttpClient& HttpClient::operator=(HttpClient&&) noexcept = default;
 
 Result<HttpResponse> HttpClient::get(std::string_view path) const {
-	if (impl_->curl == nullptr) {
-		const char* message = impl_->global_status == CURLE_OK
-								  ? "curl_easy_init failed"
-								  : curl_easy_strerror(impl_->global_status);
-		return std::unexpected(Error::network(message));
+	if (impl_ == nullptr) {
+		return std::unexpected(Error::invalid_request("HttpClient was moved from"));
 	}
-
-	CURL* curl = impl_->curl;
+	Impl& impl = *impl_;
+	if (impl.runtime->status() != CURLE_OK) {
+		return std::unexpected(Error::network(curl_easy_strerror(impl.runtime->status())));
+	}
+	std::unique_ptr<Connection> connection = impl.checkout();
+	if (connection->curl == nullptr) {
+		return std::unexpected(Error::network("curl_easy_init failed"));
+	}
 	const std::string url =
-		is_absolute_url(path) ? std::string{path} : impl_->config.base_url + std::string{path};
-	BodySink sink;
-	sink.limit = impl_->config.max_response_bytes;
-	std::vector<std::pair<std::string, std::string>> response_headers;
-
-	curl_easy_reset(curl);
-	curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
-	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &write_cb);
-	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
-	curl_easy_setopt(curl, CURLOPT_HEADERFUNCTION, &header_cb);
-	curl_easy_setopt(curl, CURLOPT_HEADERDATA, &response_headers);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(impl_->config.timeout.count()));
-	// This SDK speaks to public HTTP(S) endpoints only. Without this libcurl
-	// happily honours file://, dict://, scp:// and friends, and a path built
-	// from user input becomes a local-file read.
-	curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https");
-	curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https");
-	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
-	// Parity with spc-data/src/fetcher.cpp:
-	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
-	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
-	curl_easy_setopt(curl, CURLOPT_USERAGENT, impl_->config.user_agent.c_str());
-	curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, impl_->config.verify_ssl ? 1L : 0L);
-	curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, impl_->config.verify_ssl ? 2L : 0L);
-
-	CURLcode rc = curl_easy_perform(curl);
-	if (rc != CURLE_OK) {
-		if (sink.overflowed) {
-			return std::unexpected(
-				Error::network("response exceeded ClientConfig::max_response_bytes"));
-		}
-		return std::unexpected(Error::network(curl_easy_strerror(rc)));
-	}
-
-	long http_code = 0;
-	curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &http_code);
-
-	return HttpResponse{
-		static_cast<std::int16_t>(http_code),
-		std::move(sink.body),
-		std::move(response_headers),
-	};
+		is_absolute_url(path) ? std::string{path} : impl.config.base_url + std::string{path};
+	Result<HttpResponse> response = perform(*connection, url, impl.config);
+	impl.checkin(std::move(connection));
+	return response;
 }
 
 const ClientConfig& HttpClient::config() const noexcept {
+	if (impl_ == nullptr) {
+		return kMovedFromConfig;
+	}
 	return impl_->config;
 }
 

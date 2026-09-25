@@ -1,51 +1,30 @@
-# Security Policy
+# Security policy
 
-`spc-cpp` is a third-party C++ client for NOAA Storm Prediction Center
-(SPC) public products (static GeoJSON feeds, the ArcGIS MapServer, and
-the IEM historical archive). Those endpoints are unauthenticated, but
-consumers of this library may run it inside services that handle
-credentials or sensitive operator data. This file is the canonical
-contact path for reporting a vulnerability in the client.
+spc-cpp talks only to public, unauthenticated NOAA and IEM services, but it
+often runs inside services that hold credentials. Please report
+vulnerabilities in the library privately.
 
-## Supported Versions
+## Supported versions
 
-Security fixes are made on the latest published `vX.Y.Z` tag. Older
-tags are not back-patched — bump your `FetchContent_Declare(... GIT_TAG ...)`
-pin or your `find_package(spc X.Y.Z REQUIRED)` constraint to the
-latest minor on the same major as part of the upgrade.
+Fixes land in the next release. Older tags are not patched, so upgrade your
+`GIT_TAG` or `find_package` version to get them.
 
-| Version    | Supported          |
-| ---------- | ------------------ |
-| latest tag | :white_check_mark: |
-| older      | :x:                |
+## Reporting a vulnerability
 
-## Reporting a Vulnerability
+Use GitHub's [private vulnerability
+reporting](https://github.com/Reddimus/spc-cpp/security/advisories/new). Do not
+open a public issue.
 
-**Do not open a public issue.** Use GitHub's [private vulnerability
-reporting](https://github.com/Reddimus/spc-cpp/security/advisories/new)
-flow, which delivers the report to the maintainer privately and tracks
-coordinated disclosure.
+Include the affected version or commit, a minimal reproduction, and the
+impact you see, such as memory corruption or a denial of service.
 
-When reporting, please include:
+You can expect an acknowledgement within 3 business days, an assessment
+within 7, and then either a fixed release or a timeline for one.
 
-- Affected version (tag or commit SHA)
-- A reproduction — minimal code or test case
-- Impact (memory corruption / DoS / something else)
-- Whether you've notified anyone else
+## Out of scope
 
-You can expect:
-
-- Acknowledgement within **3 business days**
-- An initial assessment + severity rating within **7 business days**
-- A fix on a new `vX.Y.Z+1` tag, or a clear timeline if the fix is
-  larger
-
-## Out of Scope
-
-- Bugs against the SPC / NWS MapServer / IEM endpoints themselves —
-  those go to the respective operators, not this client library.
-- Operational issues (rate-limit handling, network blips, third-party
-  IEM flakiness) — file a regular issue.
-- Theoretical issues against dependencies — report them upstream
-  (`libcurl`, `glaze`, `googletest`). We pin via FetchContent and bump
-  on credible advisories.
+- Problems with the NOAA, SPC, or IEM services themselves. Report those to
+  their operators.
+- Rate limiting, network failures, or IEM outages. Open a regular issue.
+- Vulnerabilities in libcurl, Glaze, or GoogleTest. Report them upstream; this
+  project updates its pins when an advisory affects it.

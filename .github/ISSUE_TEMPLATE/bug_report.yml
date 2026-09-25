@@ -1,38 +1,37 @@
 name: Bug report
-description: A bug, crash, or incorrect behavior.
+description: A crash, a wrong result, or a build failure.
 labels: [bug]
 body:
   - type: textarea
     id: what
     attributes:
       label: What happened?
-      description: A clear description of the bug. Include error messages, crash backtraces, or wire-format dumps if relevant.
+      description: What you expected, what you got, and any error message or backtrace.
     validations:
       required: true
   - type: textarea
     id: repro
     attributes:
-      label: Reproduction steps
-      description: Minimum steps + minimum code that triggers the bug. Inline snippets are fine; please don't paste a whole project.
+      label: How to reproduce
+      description: The smallest code or steps that show the problem.
       placeholder: |
-        1. Build with `make build`
-        2. Run `./build/bin/example_<name>`
-        3. Observe ...
+        1. make build
+        2. ./build/examples/example_arcgis
+        3. ...
     validations:
       required: true
   - type: textarea
     id: env
     attributes:
       label: Environment
-      description: SDK version, compiler, OS, dependency versions (libcurl/libwebsockets/openssl).
       placeholder: |
-        - SDK version: vX.Y.Z (or commit SHA)
-        - OS: Ubuntu 24.04 / macOS 14 / Windows 2022
-        - Compiler: gcc 13.3 / clang 18 / MSVC 19.40
-        - cmake --version: ...
+        - spc-cpp: v0.3.0 (or commit)
+        - OS: Ubuntu 24.04 / macOS 26
+        - Compiler: GCC 13.3 / Clang 18 / Apple Clang 17
+        - libcurl: 8.5.0
     validations:
       required: true
   - type: markdown
     attributes:
       value: |
-        **Security vulnerabilities:** please use the channel in [SECURITY.md](../SECURITY.md), not a public issue.
+        Report security vulnerabilities privately, as described in the [security policy](https://github.com/Reddimus/spc-cpp/security/policy).

@@ -1,7 +1,5 @@
 /// @file parse_outlook.cpp
-/// @brief Minimal example: parse an SPC categorical GeoJSON body and print
-/// the per-severity feature summary. (PR-2 adds the network-fetching
-/// static-feed / ArcGIS / archive examples.)
+/// @brief Parse a categorical outlook body without any network access.
 
 #include "spc/spc.hpp"
 
@@ -9,7 +7,7 @@
 #include <string>
 
 int main() {
-	// A tiny inline day-1 categorical outlook (SLGT over a box).
+	// A one-band day 1 outlook: slight risk over a box in Oklahoma and Kansas.
 	const std::string body = R"({
 		"type": "FeatureCollection",
 		"features": [{
@@ -21,11 +19,12 @@ int main() {
 		}]
 	})";
 
-	const spc::CategoricalOutlookPayload p = spc::parse_categorical(body, 1);
-	std::cout << "day_offset=" << p.day_offset << " features=" << p.features.size() << "\n";
-	for (const spc::OutlookFeature& f : p.features) {
-		std::cout << "  label=" << f.label << " severity=" << static_cast<int>(f.severity)
-				  << " rings=" << f.rings.size() << " valid_from=" << f.valid_from << "\n";
+	const spc::CategoricalOutlookPayload outlook = spc::parse_categorical(body, 1);
+	for (const spc::OutlookFeature& band : outlook.features) {
+		std::cout << band.label << " (severity " << static_cast<int>(band.severity) << ") valid "
+				  << band.valid_from << " to " << band.valid_until << "\n";
+		std::cout << "  Wichita inside: " << std::boolalpha
+				  << spc::point_in_feature(-97.34, 37.69, band) << "\n";
 	}
 	return 0;
 }

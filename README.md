@@ -5,12 +5,42 @@
 [![C++23](https://img.shields.io/badge/C%2B%2B-23-blue.svg)](https://en.cppreference.com/w/cpp/23)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-spc-cpp is a C++23 SDK for NOAA Storm Prediction Center weather products. It
-reads SPC's ArcGIS services, static GeoJSON feeds, and selected Iowa
-Environmental Mesonet archives. Every fallible SDK operation returns
-`std::expected`; no API key is required.
+A C++23 client for NOAA Storm Prediction Center products: convective and
+fire-weather outlooks, mesoscale discussions, watches, and storm reports. It
+reads NOAA's ArcGIS services, SPC's static GeoJSON feeds, and the Iowa
+Environmental Mesonet archive. None of them need an API key.
 
-## First run
+```cpp
+#include "spc/spc.hpp"
+
+#include <iostream>
+
+int main() {
+    const spc::ArcGISClient client;
+    const spc::Result<spc::CategoricalOutlookPayload> outlook = client.query_categorical(1);
+    if (!outlook) {
+        std::cerr << outlook.error().message << "\n";
+        return 1;
+    }
+    for (const spc::OutlookFeature& band : outlook->features) {
+        std::cout << band.label << " covers Wichita: "
+                  << spc::point_in_feature(-97.34, 37.69, band) << "\n";
+    }
+}
+```
+
+## Requirements
+
+- CMake 3.31 or newer, which Glaze requires. Ubuntu 24.04 ships 3.28, so
+  install a newer one with `pipx install cmake` or from Kitware's APT
+  repository.
+- GCC 13+ or Clang 18+. CI also builds with the current Apple Clang.
+- libcurl 7.85 or newer
+
+CMake downloads Glaze and GoogleTest during configuration. Consumers of an
+installed package need neither.
+
+## Build and test
 
 ```bash
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
@@ -18,73 +48,11 @@ cmake --build build --parallel
 ctest --test-dir build --output-on-failure
 ```
 
-The build requires CMake, a C++23 compiler, and libcurl.
+The tests never touch the network.
 
-## Use the SDK
+## Add it to your project
 
-```cpp
-#include "spc/spc.hpp"
-
-spc::ArcGISClient client;
-spc::Result<spc::ProbOutlookPayload> outlook =
-    client.query_probabilistic(1, "tornado");
-if (!outlook) {
-    // Inspect outlook.error().code and outlook.error().message.
-}
-```
-
-The clients validate day and product combinations before making a request.
-Supported ArcGIS products include:
-
-- Day 1 through 3 categorical outlooks.
-- Day 1 and 2 tornado, hail, and wind probabilities.
-- Day 3 severe probability.
-- Day 1 through 3 conditional intensity.
-- Day 4 through 8 severe probability.
-- Day 1 through 8 fire weather, merging both published layers for each day.
-  Days 1 and 2 report categorical severity; days 3 through 8 report normalized
-  probability.
-- Active mesoscale discussions.
-
-`StaticFeedClient` provides categorical, probabilistic, and day 4 through 8
-fallbacks. `ArchiveClient` reads IEM watch and storm-report data.
-
-### Active watches
-
-Use `ArchiveClient::watches()` for SPC watch boxes. NOAA's WWA ArcGIS service
-publishes CAP and WFO polygons, but it omits the SPC parameters represented by
-`WatchPayload`, including PDS status and maximum hail and wind. The old
-`ArcGISClient::query_active_watches()` method is deprecated and returns
-`InvalidRequest` instead of fabricating incomplete watches.
-
-Storm reports are the same story: the SPC MapServer publishes no Local Storm
-Report layer, so `ArcGISClient::query_storm_reports()` is deprecated and always
-fails. Use `ArchiveClient::storm_reports()`.
-
-For anything the typed methods do not cover,
-`ArcGISClient::query_layer(service, layer_id, params)` runs a raw paged query
-against any of the three NOAA MapServers and returns the page bodies.
-
-### Custom networking
-
-`HttpClient` is the default GET transport. Implement `HttpTransport` and pass
-a `std::shared_ptr<HttpTransport>` to a high-level client to use another
-network stack or deterministic test responses.
-
-## Install
-
-```bash
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DSPC_BUILD_TESTS=OFF
-cmake --build build --parallel
-cmake --install build --prefix /your/prefix
-```
-
-```cmake
-find_package(spc 0.2 REQUIRED)
-target_link_libraries(myapp PRIVATE spc::spc)
-```
-
-FetchContent consumers can pin the release:
+With FetchContent:
 
 ```cmake
 include(FetchContent)
@@ -96,49 +64,106 @@ FetchContent_MakeAvailable(spc_cpp)
 target_link_libraries(myapp PRIVATE spc::spc)
 ```
 
-## Project map
+As a subproject, spc-cpp skips its tests, examples, and install rules. If you
+install a library that links `spc::spc`, set `SPC_INSTALL` to `ON` before
+`FetchContent_MakeAvailable` so spc-cpp's targets join an export set.
 
-| Path | Contents |
-| --- | --- |
-| `include/spc/` | Public clients, models, errors, and geometry helpers |
-| `src/api/` | Static feed, ArcGIS, and IEM routing |
-| `src/core/` | Errors, geometry, and the rate limiter |
-| `src/models/` | Glaze-backed GeoJSON and Esri parsers |
-| `src/http/` | libcurl transport |
-| `tests/` | Public client tests and captured parser fixtures |
-| `tools/` | Style, consumer, and live metadata checks |
-
-The static libraries form this dependency chain:
-`spc_core -> spc_http -> spc_models -> spc_api`. Link `spc::spc` unless you
-need one layer directly.
-
-## Verify changes
+Or install it and use `find_package`:
 
 ```bash
-make test
-make lint
-make test-consumers
-make fixtures-check
-python3 tools/verify_arcgis_metadata.py  # requires network access
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build --parallel
+cmake --install build --prefix /your/prefix
 ```
 
-The normal unit suite does not depend on NOAA availability. The metadata
-command compares the live ArcGIS layer IDs and names with the checked
-2026-09-03 contract, then queries all 39 feature layers.
+```cmake
+find_package(spc 0.3 REQUIRED)
+target_link_libraries(myapp PRIVATE spc::spc)
+```
 
-### JSON library: Glaze (divergence note)
+Until 1.0, a minor release can break the API, so `find_package` only accepts
+the same minor version.
 
-SPC payloads vary in key case, numeric representation, and geometry type. The
-parsers use Glaze 8.3's generic JSON tree to handle those shapes. The original
-convective parser stays aligned with the downstream `spc-data` service; new
-product parsers keep their own label mappings.
+## Clients
 
-## References
+| Client | Source | Products |
+| --- | --- | --- |
+| `ArcGISClient` | NOAA ArcGIS MapServers | Categorical, probabilistic, conditional intensity, days 4-8, fire weather, mesoscale discussions, raw layer queries |
+| `StaticFeedClient` | SPC's GeoJSON files | Categorical, probabilistic, days 4-8 |
+| `ArchiveClient` | Iowa Environmental Mesonet | Watches, Local Storm Reports |
+
+`ArcGISClient` is the one to start with. It covers the most products and pages
+through large results for you. `StaticFeedClient` is a fallback that reads the
+same outlooks from SPC's own files. For watch boxes and storm reports, use
+`ArchiveClient`, because NOAA's ArcGIS watch layer lacks SPC's watch details
+and SPC publishes no storm-report layer.
+
+Each client checks the day and hazard before sending anything, so a request
+for day 4 categorical fails at once with `InvalidRequest`.
+
+## Handling errors
+
+Every call returns `spc::Result<T>`, an alias for `std::expected<T,
+spc::Error>`. Nothing throws for network or data problems.
+`Error::code` says what went wrong:
+
+| Code | Meaning |
+| --- | --- |
+| `FeedUnavailable` | SPC has not issued this product right now. Treat it as no data. |
+| `NotFound` | A wrong or retired URL or layer. Treat it as a bug to report. |
+| `InvalidRequest` | An unsupported day or hazard, or a request ArcGIS rejected. |
+| `RateLimited` | HTTP 429 or 503 after retries, or IEM's local rate limit. |
+| `NetworkError`, `ServerError`, `ParseError` | Transport failure, HTTP 5xx, or unexpected JSON. |
+
+Only `StaticFeedClient` returns `FeedUnavailable`. Overnight, for example,
+there is often no day 1 probabilistic file. On ArcGIS the same situation is a
+successful result with no features.
+
+The standalone `parse_*` functions are the exception. They throw
+`std::runtime_error` when given malformed JSON.
+
+## Threads and networking
+
+`HttpClient`, the default transport, is safe to share between threads. It
+keeps a small pool of libcurl handles, so connections stay open between
+requests. Clients built on it are safe to share too.
+
+To use your own network stack, or canned responses in tests, implement
+`spc::HttpTransport` and pass it in:
+
+```cpp
+std::shared_ptr<spc::HttpTransport> transport = std::make_shared<MyTransport>();
+const spc::ArcGISClient client{transport};
+```
+
+`ArchiveClient` limits itself to a burst of 2 requests, then 1 per second,
+because IEM is a free service run by Iowa State University.
+
+## Examples
+
+| Example | Shows |
+| --- | --- |
+| [`parse_outlook.cpp`](examples/parse_outlook.cpp) | Parsing a body offline and testing a point |
+| [`arcgis.cpp`](examples/arcgis.cpp) | Categorical and tornado outlooks, active mesoscale discussions |
+| [`fire_weather.cpp`](examples/fire_weather.cpp) | Fire weather for days 1 to 3 |
+| [`static_feed.cpp`](examples/static_feed.cpp) | The static feed and `FeedUnavailable` |
+| [`watches.cpp`](examples/watches.cpp) | Watches now and on a past date |
+| [`archive.cpp`](examples/archive.cpp) | One NWS office's storm reports |
+
+Run one with `make run-arcgis`, `make run-watches`, and so on.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md). Report security issues as described in
+[SECURITY.md](SECURITY.md).
+
+## Data sources
 
 - [SPC products](https://www.spc.noaa.gov/products/)
 - [SPC outlook MapServer](https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/SPC_wx_outlks/MapServer)
 - [SPC fire-weather MapServer](https://mapservices.weather.noaa.gov/vector/rest/services/fire_weather/SPC_firewx/MapServer)
-- [IEM SPC archive](https://mesonet.agron.iastate.edu/)
+- [SPC mesoscale discussion MapServer](https://mapservices.weather.noaa.gov/vector/rest/services/outlooks/spc_mesoscale_discussion/MapServer)
+- [IEM JSON and GeoJSON services](https://mesonet.agron.iastate.edu/api/)
 
 ## License
 

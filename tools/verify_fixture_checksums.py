@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Verify that every parser fixture matches the checked SHA-256 manifest."""
+"""Check tests/fixtures against tests/fixtures/SHA256SUMS, in both directions."""
 
 from __future__ import annotations
 

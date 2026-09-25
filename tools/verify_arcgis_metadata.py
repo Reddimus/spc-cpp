@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Compare NOAA's live ArcGIS layer metadata with the checked contract."""
+"""Compare NOAA's live ArcGIS layers with the checked-in contract.
+
+Checks each MapServer's version and layer ids, names, and parents, then runs a
+one-record query, ordered by objectid as the SDK's queries are, against every
+feature layer. Needs network access.
+"""
 
 from __future__ import annotations
 
@@ -36,6 +41,7 @@ def normalized_layers(document: dict[str, object]) -> list[list[object]]:
 def main() -> int:
     contract = json.loads(CONTRACT.read_text(encoding="utf-8"))
     failures: list[str] = []
+    queried = 0
     for service in contract["services"]:
         try:
             live = fetch_json(service["url"])
@@ -57,10 +63,12 @@ def main() -> int:
                 "outFields": "*",
                 "returnGeometry": "false",
                 "resultRecordCount": "1",
+                "orderByFields": "objectid",
                 "f": "json",
             }
         )
         for layer_id in service["queryable"]:
+            queried += 1
             query_url = f"{service_url}/{layer_id}/query?{query}"
             try:
                 response = fetch_json(query_url)
@@ -76,7 +84,7 @@ def main() -> int:
     if failures:
         print("\n".join(failures), file=sys.stderr)
         return 1
-    print("NOAA ArcGIS metadata and all 39 feature layers match the 2026-09-03 contract")
+    print(f"NOAA ArcGIS metadata and all {queried} feature layers match {CONTRACT.name}")
     return 0
 
 

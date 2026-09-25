@@ -1,32 +1,29 @@
 /// @file outlook.hpp
-/// @brief SPC convective (categorical + probabilistic) GeoJSON parsers.
-///
-/// EXTRACTED VERBATIM from spc-data/src/parser.hpp (Workstream C). Signatures
-/// and throw-contract are byte-identical to spc-data; only the namespace
-/// changed (`predictioncast::spc_data` -> `spc`). This is the parity-critical
-/// path — the byte-identity gate in the spc-data refactor depends on it.
+/// @brief Day 1-3 categorical and probabilistic outlook parsers.
 
 #pragma once
 
 #include "spc/types.hpp"
 
+#include <cstdint>
+#include <string>
 #include <string_view>
 
 namespace spc {
 
-/// Map SPC categorical label to a 1..5 severity value. Returns 0 if unknown.
+/// Categorical label to severity: TSTM and MRGL 1, SLGT 2, ENH 3, MDT 4,
+/// HIGH 5. Returns 0 for anything else.
 [[nodiscard]] std::uint8_t severity_from_label(std::string_view label) noexcept;
 
-/// Parse SPC's day-N categorical outlook GeoJSON (day{1,2,3}otlk_cat.geojson,
-/// day4-8otlk.geojson) from a raw JSON body. Caller passes the target day for
-/// the payload header. Throws std::runtime_error on malformed JSON.
+/// Parse a categorical outlook (GeoJSON). `day_offset` is copied into the
+/// payload. Bands with an unknown label or no rings are skipped.
+/// @throws std::runtime_error if `body` is not valid JSON.
 [[nodiscard]] CategoricalOutlookPayload parse_categorical(std::string_view body,
 														  std::int32_t day_offset);
 
-/// Parse SPC's day-N probabilistic outlook GeoJSON
-/// (day{1,2}otlk_{torn,hail,wind}.geojson or day3otlk_prob.geojson) from a
-/// raw JSON body. Throws
-/// std::runtime_error on malformed JSON.
+/// Parse a probabilistic outlook (GeoJSON). Probabilities are normalized to
+/// [0, 1]; isopleths with no probability or no rings are skipped.
+/// @throws std::runtime_error if `body` is not valid JSON.
 [[nodiscard]] ProbOutlookPayload parse_probabilistic(std::string_view body, std::int32_t day_offset,
 													 std::string hazard);
 
