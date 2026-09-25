@@ -29,7 +29,7 @@ void fill_message_from_body(Error& err, const std::string& body) {
 				err.detail = d->second.get<std::string>();
 			} else if (d != eo.end() && d->second.is_array()) {
 				for (const glz::generic& item : d->second.get_array()) {
-					if (item.is_string()) {
+					if (item.is_string() && !item.get<std::string>().empty()) {
 						err.detail += (err.detail.empty() ? "" : "; ") + item.get<std::string>();
 					}
 				}

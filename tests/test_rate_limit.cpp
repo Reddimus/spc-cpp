@@ -139,7 +139,7 @@ TEST(RateLimit, AvailableTokensIncludesTokensEarnedWhileIdle) {
 	EXPECT_EQ(limiter.available_tokens(), 3);
 }
 
-TEST(RateLimit, NoDailyCapMeansNoDailyCount) {
+TEST(RateLimit, WithoutADailyCapNothingIsReportedRemaining) {
 	RateLimiter::Config config;
 	config.daily_limit = 0;
 	RateLimiter limiter{config};
