@@ -3,10 +3,10 @@
 BUILD_DIR := build
 CMAKE := cmake
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
-SOURCES = find src include tests examples \( -name '*.cpp' -o -name '*.hpp' \) -print0
+SOURCES = find src include tests examples benchmarks \( -name '*.cpp' -o -name '*.hpp' \) -print0
 
 .PHONY: all build debug configure configure-debug test test-consumers fixtures-check lint \
-	lint-md format format-md tidy coverage pre-commit install-hooks clean help
+	lint-md format format-md tidy bench coverage pre-commit install-hooks clean help
 
 all: build
 
@@ -52,6 +52,12 @@ tidy:
 		-DSPC_BUILD_TESTS=OFF -DSPC_BUILD_EXAMPLES=OFF $(CMAKE_ARGS)
 	@$(CMAKE) --build build-tidy -j$(NPROC)
 
+# Release build in build-bench, without tests and examples.
+bench:
+	@$(MAKE) --no-print-directory build BUILD_DIR=build-bench \
+		CMAKE_ARGS="-DSPC_BUILD_BENCHMARKS=ON -DSPC_BUILD_TESTS=OFF -DSPC_BUILD_EXAMPLES=OFF $(CMAKE_ARGS)"
+	@./build-bench/benchmarks/spc_benchmarks $(BENCH_ARGS)
+
 coverage:
 	@$(CMAKE) -S . -B build-coverage -DCMAKE_BUILD_TYPE=Debug -DSPC_ENABLE_COVERAGE=ON
 	@$(CMAKE) --build build-coverage -j$(NPROC)
@@ -90,6 +96,7 @@ help:
 	@echo "make fixtures-check  Verify tests/fixtures/SHA256SUMS"
 	@echo "make test-consumers  Build installed and FetchContent consumers"
 	@echo "make tidy            Compile the libraries with clang-tidy"
+	@echo "make bench           Run the benchmarks (BENCH_ARGS=... passes flags)"
 	@echo "make format          Format C++ in place"
 	@echo "make format-md       Fix Markdown lint findings in place"
 	@echo "make coverage        HTML coverage report (needs lcov)"

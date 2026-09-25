@@ -31,6 +31,19 @@ target_compile_definitions(spc_tests PRIVATE
 include(GoogleTest)
 gtest_discover_tests(spc_tests DISCOVERY_TIMEOUT 30)
 
+# The allocation counter replaces operator new and delete, as the sanitizers
+# do, so it gets its own binary and sanitizer builds leave it out.
+if(NOT SPC_ENABLE_SANITIZERS AND NOT SPC_ENABLE_THREAD_SANITIZER)
+    add_executable(spc_allocation_tests
+        test_allocation_counter.cpp
+        support/allocation_counter.cpp
+    )
+    spc_set_warnings(spc_allocation_tests)
+    target_link_libraries(spc_allocation_tests PRIVATE GTest::gtest_main)
+    target_include_directories(spc_allocation_tests PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+    gtest_discover_tests(spc_allocation_tests DISCOVERY_TIMEOUT 30)
+endif()
+
 # Each public header must compile on its own, with no Glaze on the include path.
 file(GLOB_RECURSE spc_public_headers CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/include/spc/*.hpp)
 set(spc_header_check_sources)
