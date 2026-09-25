@@ -470,6 +470,9 @@ TEST(Models, WatchNumbersThatAreNotFiniteIntegersBecomeZero) {
 TEST(Models, StormReportsParseIemLsr) {
 	const StormReportPayload p = parse_storm_reports(read_fixture("iem_storm_reports.json"));
 	ASSERT_GT(p.reports.size(), 0u);
+	std::vector<StormReport> sized_once;
+	sized_once.reserve(p.reports.size());
+	EXPECT_EQ(p.reports.capacity(), sized_once.capacity()); // one reservation, no growth
 	for (std::size_t i = 0; i < 5 && i < p.reports.size(); ++i) {
 		const StormReport& sr = p.reports[i];
 		EXPECT_FALSE(sr.type_text.empty());
