@@ -66,12 +66,12 @@ coverage:
 pre-commit: format lint
 
 install-hooks:
-	@if [ -f .git/hooks/pre-commit ] && ! grep -q 'make pre-commit' .git/hooks/pre-commit; then \
-		echo ".git/hooks/pre-commit already exists; not replacing it"; exit 1; \
-	fi
-	@printf '#!/bin/sh\nexec make pre-commit\n' > .git/hooks/pre-commit
-	@chmod +x .git/hooks/pre-commit
-	@echo "Installed .git/hooks/pre-commit (runs make pre-commit)"
+	@hook="$$(git rev-parse --git-path hooks)/pre-commit"; \
+	if [ -f "$$hook" ] && ! grep -q 'make pre-commit' "$$hook"; then \
+		echo "$$hook already exists; not replacing it"; exit 1; \
+	fi; \
+	mkdir -p "$$(dirname "$$hook")" && printf '#!/bin/sh\nexec make pre-commit\n' > "$$hook" && \
+	chmod +x "$$hook" && echo "Installed $$hook (runs make pre-commit)"
 
 # Run an example: make run-static_feed, run-arcgis, run-fire_weather,
 # run-archive, run-watches, or run-parse_outlook.

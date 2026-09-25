@@ -88,9 +88,15 @@ struct RetryPolicy {
 		if (!matches) {
 			continue;
 		}
+		// A custom transport may leave the space after the colon in the value.
+		const std::string_view value = header.second;
+		const std::size_t start = value.find_first_not_of(" \t");
+		if (start == std::string_view::npos) {
+			return std::chrono::milliseconds{0};
+		}
 		std::int64_t seconds = 0;
-		const std::from_chars_result parsed = std::from_chars(
-			header.second.data(), header.second.data() + header.second.size(), seconds);
+		const std::from_chars_result parsed =
+			std::from_chars(value.data() + start, value.data() + value.size(), seconds);
 		if (parsed.ec == std::errc{} && seconds > 0) {
 			// Cap before converting so a huge value cannot overflow.
 			constexpr std::int64_t kMaxSeconds = std::int64_t{365} * 24 * 60 * 60;

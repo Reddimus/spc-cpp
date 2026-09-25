@@ -30,3 +30,17 @@ target_compile_definitions(spc_tests PRIVATE
 
 include(GoogleTest)
 gtest_discover_tests(spc_tests DISCOVERY_TIMEOUT 30)
+
+# Each public header must compile on its own, with no Glaze on the include path.
+file(GLOB_RECURSE spc_public_headers CONFIGURE_DEPENDS ${PROJECT_SOURCE_DIR}/include/spc/*.hpp)
+set(spc_header_check_sources)
+foreach(header IN LISTS spc_public_headers)
+    file(RELATIVE_PATH relative ${PROJECT_SOURCE_DIR}/include ${header})
+    string(MAKE_C_IDENTIFIER ${relative} name)
+    set(source ${CMAKE_CURRENT_BINARY_DIR}/header_check/${name}.cpp)
+    file(CONFIGURE OUTPUT ${source} CONTENT "#include \"${relative}\"\n")
+    list(APPEND spc_header_check_sources ${source})
+endforeach()
+add_library(spc_header_check OBJECT ${spc_header_check_sources})
+target_link_libraries(spc_header_check PRIVATE spc::spc)
+spc_set_warnings(spc_header_check)

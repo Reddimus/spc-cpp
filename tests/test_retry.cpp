@@ -88,6 +88,12 @@ TEST(Retry, HonoursRetryAfterInsteadOfTheComputedBackoff) {
 	EXPECT_GE(waited.count(), 100);
 }
 
+TEST(Retry, RetryAfterToleratesSurroundingWhitespace) {
+	const HttpResponse response{429, "", {{"retry-after", " \t30 "}}};
+
+	EXPECT_EQ(retry_after(response), std::chrono::seconds{30});
+}
+
 TEST(Retry, AHugeRetryAfterIsCappedInsteadOfOverflowing) {
 	const HttpResponse response{429, "", {{"Retry-After", "99999999999999999"}}};
 

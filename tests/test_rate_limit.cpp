@@ -1,6 +1,9 @@
 /// @file test_rate_limit.cpp
 /// @brief RateLimiter: bad configs cannot crash or hang it, waits are
 /// bounded, and the refill rate is exact.
+///
+/// CI machines oversleep, so timing checks only assert bounds that extra
+/// sleep cannot break: "not sooner than" and "gave up without waiting".
 
 #include "spc/rate_limit.hpp"
 
@@ -64,7 +67,7 @@ TEST(RateLimit, AnExhaustedDailyQuotaFailsFastInsteadOfWaitingForMidnight) {
 	EXPECT_EQ(limiter.daily_requests_remaining(), 0);
 }
 
-TEST(RateLimit, AcquireWaitsForTheNextTokenInsteadOfPolling) {
+TEST(RateLimit, AcquireWaitsForTheNextToken) {
 	RateLimiter::Config config;
 	config.max_tokens = 1;
 	config.initial_tokens = 0;
@@ -73,42 +76,55 @@ TEST(RateLimit, AcquireWaitsForTheNextTokenInsteadOfPolling) {
 
 	const steady_clock::time_point start = steady_clock::now();
 	ASSERT_TRUE(limiter.acquire());
-	const milliseconds waited = elapsed_since(start);
 
-	EXPECT_GE(waited.count(), 45);
-	EXPECT_LT(waited.count(), 500);
+	EXPECT_GE(elapsed_since(start).count(), 45);
 }
 
 TEST(RateLimit, ABoundedWaitGivesUpAtOnceWhenNoTokenCanArriveInTime) {
 	RateLimiter::Config config;
 	config.max_tokens = 1;
 	config.initial_tokens = 0;
-	config.refill_interval = milliseconds{10000};
+	config.refill_interval = milliseconds{60000};
 	RateLimiter limiter{config};
 
 	const steady_clock::time_point start = steady_clock::now();
-	EXPECT_FALSE(limiter.acquire_for(milliseconds{100}));
-	EXPECT_LT(elapsed_since(start).count(), 100);
+	EXPECT_FALSE(limiter.acquire_for(milliseconds{5000}));
+	// Sleeping until the deadline would take the full 5 s.
+	EXPECT_LT(elapsed_since(start).count(), 2500);
 }
 
-TEST(RateLimit, TokensArriveAtTheConfiguredRate) {
-	// Resetting the refill clock to "now" on every refill dropped the partial
-	// interval, so the real rate ran below the configured one.
+TEST(RateLimit, TokensNeverArriveFasterThanConfigured) {
 	RateLimiter::Config config;
 	config.max_tokens = 1;
 	config.initial_tokens = 0;
 	config.refill_interval = milliseconds{20};
 	RateLimiter limiter{config};
 
-	constexpr int kTokens = 10;
 	const steady_clock::time_point start = steady_clock::now();
-	for (int i = 0; i < kTokens; ++i) {
+	for (int i = 0; i < 10; ++i) {
 		ASSERT_TRUE(limiter.acquire());
 	}
-	// Ten tokens at 20 ms each: never faster than 200 ms, and not far slower.
-	const milliseconds waited = elapsed_since(start);
-	EXPECT_GE(waited.count(), 195);
-	EXPECT_LT(waited.count(), 600);
+
+	EXPECT_GE(elapsed_since(start).count(), 195);
+}
+
+TEST(RateLimit, ARefillKeepsThePartialInterval) {
+	// After 1.5 intervals one token is due and half an interval is banked, so
+	// the next token is due 2 intervals from the start, not 1 interval after
+	// the refill. The bucket has room, so it keeps earning; oversleeping only
+	// makes the second check easier.
+	RateLimiter::Config config;
+	config.max_tokens = 5;
+	config.initial_tokens = 0;
+	config.refill_interval = milliseconds{100};
+	RateLimiter limiter{config};
+	const steady_clock::time_point start = steady_clock::now();
+
+	std::this_thread::sleep_until(start + milliseconds{150});
+	ASSERT_TRUE(limiter.try_acquire());
+	std::this_thread::sleep_until(start + milliseconds{210});
+
+	EXPECT_TRUE(limiter.try_acquire());
 }
 
 TEST(RateLimit, ConcurrentCallersNeverGetMoreTokensThanTheBucketHolds) {
