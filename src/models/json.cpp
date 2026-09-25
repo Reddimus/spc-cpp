@@ -190,7 +190,9 @@ std::vector<Polygon> parse_esri_rings(const Json& geom) {
 
 glz::expected<Json, std::string> parse_root(std::string_view body) {
 	Json root{};
-	const glz::error_ctx ec = glz::read_json(root, body);
+	// A view can end mid-buffer, so don't let Glaze assume a terminator after it.
+	constexpr glz::opts options{.null_terminated = false};
+	const glz::error_ctx ec = glz::read<options>(root, body);
 	if (ec) {
 		return glz::unexpected(glz::format_error(ec, body));
 	}

@@ -27,6 +27,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   0 on those builds. Every platform now uses the fast_float code that Glaze
   already bundles, which also parses a number in about a tenth of the
   stream's instructions.
+- The `parse_*` functions could read past the end of the `std::string_view`
+  they were given. A view over the start of a larger buffer could parse as
+  if it were the whole buffer, and a view that ran to the end of its buffer
+  was read one byte past it. Clients are unaffected, since they parse the
+  strings they own.
 
 ## [0.4.1] - 2026-09-25
 

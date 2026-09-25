@@ -9,6 +9,7 @@
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -69,6 +70,14 @@ TEST(Corpus, MalformedBodyThrows) {
 	// SPC's HTML 404 page is the usual malformed body.
 	EXPECT_THROW((void)parse_categorical(read_fixture("spc_404_no_active_outlook.html"), 1),
 				 std::runtime_error);
+}
+
+TEST(Corpus, ParsesOnlyTheViewItIsGiven) {
+	// The closing brace sits just past the view, so reading past the view's end
+	// would accept a truncated body.
+	const std::string body = R"({"type":"FeatureCollection","features":[]})";
+	const std::string_view truncated{body.data(), body.size() - 1};
+	EXPECT_THROW((void)parse_categorical(truncated, 1), std::runtime_error);
 }
 
 TEST(Corpus, EmptyFeatureCollectionIsEmptyNotError) {
