@@ -95,7 +95,9 @@ jobs:
       - name: Test the arm64 slice
         run: ctest --test-dir build --output-on-failure
       - name: Test the x86_64 slice under Rosetta 2
-        run: arch -x86_64 build/tests/spc_tests
+        run: |
+          arch -x86_64 build/tests/spc_tests
+          arch -x86_64 build/tests/spc_allocation_tests
       # The benchmarks' macOS-only memory counters build and run only here.
       - name: Run each benchmark once
         run: build/benchmarks/spc_benchmarks --benchmark_dry_run=true
