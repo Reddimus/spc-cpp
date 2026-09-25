@@ -20,7 +20,8 @@
 namespace {
 
 struct Counters {
-	std::atomic<bool> active{false};
+	std::atomic<bool> owned{false};	 // a probe exists
+	std::atomic<bool> active{false}; // allocations are being counted
 	std::atomic<std::uint64_t> allocations{0};
 	std::atomic<std::uint64_t> bytes{0};
 	std::atomic<std::int64_t> live{0};
@@ -118,17 +119,20 @@ std::size_t to_size(std::align_val_t alignment) noexcept {
 namespace spc::test {
 
 AllocationProbe::AllocationProbe() {
-	if (counters.active.exchange(true)) {
+	if (counters.owned.exchange(true)) {
 		throw std::logic_error("another AllocationProbe is active");
 	}
+	// Zero before counting starts, so no allocation is counted and then wiped.
 	counters.allocations.store(0);
 	counters.bytes.store(0);
 	counters.live.store(0);
 	counters.peak.store(0);
+	counters.active.store(true);
 }
 
 AllocationProbe::~AllocationProbe() {
 	counters.active.store(false);
+	counters.owned.store(false);
 }
 
 AllocationStats AllocationProbe::stats() const noexcept {

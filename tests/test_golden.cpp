@@ -191,7 +191,8 @@ TEST(GoldenCoverage, EveryFixtureIsParsedOrListedAsNotParsed) {
 	for (const std::filesystem::directory_entry& entry :
 		 std::filesystem::directory_iterator(SPC_FIXTURES_DIR)) {
 		const std::string name = entry.path().filename().string();
-		if (name == "README.md" || name == "SHA256SUMS") {
+		// Dotfiles such as a Finder .DS_Store are not fixtures.
+		if (name == "README.md" || name == "SHA256SUMS" || name.starts_with('.')) {
 			continue;
 		}
 		EXPECT_TRUE(has_case(name) || std::ranges::find(kNotParsed, name) != kNotParsed.end())
