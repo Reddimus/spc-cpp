@@ -6,6 +6,25 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- On macOS, any `CMAKE_OSX_DEPLOYMENT_TARGET` below 26.0 failed to compile,
+  and a default build would not start on a Mac older than macOS 26.
+  Floating-point `std::from_chars` was used whenever libc++ was version 20 or
+  newer, but Apple's libc++ provides it only from macOS 26. Older targets now
+  use the stream parser, so the earliest supported macOS is 13.4.
+- The README's error table was wrong about `NotFound`, `ServerError`, and
+  `ParseError`, omitted `Unknown`, and overstated Clang 18 support.
+
+### Changed
+
+- CI's macOS job builds the way the README does, with Apple Clang and the
+  system libcurl, as a universal arm64 and x86_64 binary for macOS 13.4. It
+  tests both slices and the consumer checks, then runs the same binary on
+  macOS 15 and on an Intel Mac.
+- The README leads with a copy-paste quick start and a table of which call
+  fetches each product.
+
 ## [0.4.0] - 2026-09-25
 
 ### Added
