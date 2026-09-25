@@ -1,6 +1,7 @@
 /// @file client.cpp
 /// @brief StaticFeedClient, ArcGISClient, and ArchiveClient.
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 #include "spc/api.hpp"
 #include "spc/pagination.hpp"
@@ -14,6 +15,7 @@
 #include <format>
 #include <iterator>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <type_traits>
@@ -194,6 +196,29 @@ Result<std::invoke_result_t<const Parse&>> parsed(const Parse& parse) {
 	}
 }
 
+/// Free `text`'s buffer now; clear() would keep the capacity.
+void release(std::string& text) noexcept {
+	std::string{}.swap(text);
+}
+
+/// Parse a fetched body once, free it, then build the result from the tree.
+/// Malformed JSON fails as the public parse_* functions do.
+template <typename Build>
+Result<std::invoke_result_t<const Build&, const Json&>> built_from(Result<std::string> body,
+																   const Build& build) {
+	if (!body) {
+		return std::unexpected(std::move(body.error()));
+	}
+	return parsed([&] {
+		glz::expected<Json, std::string> root = detail::parse_owned_root(*body);
+		release(*body);
+		if (!root) {
+			throw std::runtime_error(root.error());
+		}
+		return build(*root);
+	});
+}
+
 // ===== ArcGIS paging =====
 
 /// What paging needs from one ArcGIS response.
@@ -207,12 +232,9 @@ bool envelope_flag(const Json& root, const char* key) {
 	return flag != nullptr && flag->is_boolean() && flag->get<bool>();
 }
 
-Result<ArcGISEnvelope> inspect_arcgis_envelope(const std::string& body) {
-	const glz::expected<Json, std::string> root = detail::parse_root(body);
-	if (!root) {
-		return std::unexpected(Error::parse(root.error()));
-	}
-	const Json* error = detail::lookup(*root, "error");
+/// `body` is the text `root` was parsed from, for an ArcGIS error's message.
+Result<ArcGISEnvelope> inspect_arcgis_envelope(const Json& root, const std::string& body) {
+	const Json* error = detail::lookup(root, "error");
 	if (error != nullptr && error->is_object()) {
 		// ArcGIS reports failures with HTTP 200 and an error object.
 		const std::int32_t code =
@@ -222,17 +244,36 @@ Result<ArcGISEnvelope> inspect_arcgis_envelope(const std::string& body) {
 	ArcGISEnvelope envelope;
 	// f=json puts the flag at the root; f=geojson puts it at the root and
 	// under `properties`.
-	envelope.exceeded_transfer_limit = envelope_flag(*root, "exceededTransferLimit");
+	envelope.exceeded_transfer_limit = envelope_flag(root, "exceededTransferLimit");
 	if (!envelope.exceeded_transfer_limit) {
-		const Json* properties = detail::lookup(*root, "properties");
+		const Json* properties = detail::lookup(root, "properties");
 		envelope.exceeded_transfer_limit =
 			properties != nullptr && envelope_flag(*properties, "exceededTransferLimit");
 	}
-	const Json* features = detail::lookup(*root, "features");
+	const Json* features = detail::lookup(root, "features");
 	if (features != nullptr && features->is_array()) {
 		envelope.feature_count = static_cast<std::int32_t>(features->get_array().size());
 	}
 	return envelope;
+}
+
+/// One ArcGIS response, parsed once: the tree for the products and the
+/// envelope for paging.
+struct ArcGISPage {
+	Json root;
+	ArcGISEnvelope envelope;
+};
+
+Result<ArcGISPage> parse_arcgis_page(const std::string& body) {
+	glz::expected<Json, std::string> root = detail::parse_owned_root(body);
+	if (!root) {
+		return std::unexpected(Error::parse(std::move(root.error())));
+	}
+	const Result<ArcGISEnvelope> envelope = inspect_arcgis_envelope(*root, body);
+	if (!envelope) {
+		return std::unexpected(envelope.error());
+	}
+	return ArcGISPage{std::move(*root), *envelope};
 }
 
 bool is_json_format(std::string_view format) {
@@ -310,12 +351,9 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 		return std::unexpected(
 			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
 	}
-	const Result<std::string> body =
-		impl_->fetch(std::format("{}day{}otlk_cat.nolyr.geojson", kStaticOutlookBase, day));
-	if (!body) {
-		return std::unexpected(body.error());
-	}
-	return parsed([&] { return parse_categorical(*body, day); });
+	return built_from(
+		impl_->fetch(std::format("{}day{}otlk_cat.nolyr.geojson", kStaticOutlookBase, day)),
+		[day](const Json& root) { return detail::categorical_from_tree(root, day); });
 }
 
 Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
@@ -329,11 +367,9 @@ Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 	const std::string url =
 		day == 3 ? std::format("{}day3otlk_prob.nolyr.geojson", kStaticOutlookBase)
 				 : std::format("{}day{}otlk_{}.nolyr.geojson", kStaticOutlookBase, day, tag);
-	const Result<std::string> body = impl_->fetch(url);
-	if (!body) {
-		return std::unexpected(body.error());
-	}
-	return parsed([&] { return parse_probabilistic(*body, day, std::string{normalized}); });
+	return built_from(impl_->fetch(url), [day, normalized](const Json& root) {
+		return detail::probabilistic_from_tree(root, day, normalized);
+	});
 }
 
 Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) const {
@@ -341,12 +377,8 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) const {
 		return std::unexpected(
 			Error::invalid_request("extended outlook day must be between 4 and 8"));
 	}
-	const Result<std::string> body =
-		impl_->fetch(std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day));
-	if (!body) {
-		return std::unexpected(body.error());
-	}
-	return parsed([&] { return parse_day4_8(*body, day); });
+	return built_from(impl_->fetch(std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day)),
+					  [day](const Json& root) { return detail::day4_8_from_tree(root, day); });
 }
 
 // ===================== ArcGISClient =====================
@@ -358,11 +390,12 @@ struct ArcGISClient::Impl {
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
 		: http(usable_transport(std::move(transport))) {}
 
-	/// Fetch every page of `query`, handing each body to `on_page` as it
-	/// arrives. A 404 is NotFound: ArcGIS reports an empty product as HTTP
-	/// 200 with no features.
+	/// Fetch every page of `query`, parse each once, and hand `on_page` the
+	/// page's body and tree as it arrives. `on_page` may take the body. A 404
+	/// is NotFound: ArcGIS reports an empty product as HTTP 200 with no
+	/// features.
 	template <typename OnPage>
-		requires std::is_invocable_r_v<Result<void>, const OnPage&, std::string&&>
+		requires std::is_invocable_r_v<Result<void>, const OnPage&, std::string&, const Json&>
 	[[nodiscard]] Result<void> paged(const LayerQuery& query, const OnPage& on_page) const {
 		ArcGISPager pager;
 		while (pager.has_more()) {
@@ -372,20 +405,21 @@ struct ArcGISClient::Impl {
 			if (!body) {
 				return std::unexpected(body.error());
 			}
-			const Result<ArcGISEnvelope> envelope = inspect_arcgis_envelope(*body);
-			if (!envelope) {
-				return std::unexpected(envelope.error());
+			const Result<ArcGISPage> page = parse_arcgis_page(*body);
+			if (!page) {
+				return std::unexpected(page.error());
 			}
-			if (envelope->exceeded_transfer_limit && envelope->feature_count == 0) {
+			const ArcGISEnvelope envelope = page->envelope;
+			if (envelope.exceeded_transfer_limit && envelope.feature_count == 0) {
 				// The offset would never move.
 				return std::unexpected(
 					Error::server("ArcGIS reported a truncated page containing no records"));
 			}
-			Result<void> accepted = on_page(std::move(*body));
+			Result<void> accepted = on_page(*body, page->root);
 			if (!accepted) {
 				return accepted;
 			}
-			pager.advance(envelope->feature_count, envelope->exceeded_transfer_limit);
+			pager.advance(envelope.feature_count, envelope.exceeded_transfer_limit);
 		}
 		if (pager.page_limit_reached()) {
 			return std::unexpected(Error::server(
@@ -394,14 +428,16 @@ struct ArcGISClient::Impl {
 		return {};
 	}
 
-	/// Page through `query`, parse each page with `parse`, and move the
-	/// page's `items` into `payload`. Peak memory is one page plus the result.
-	template <typename Payload, typename Item, typename Parse>
+	/// Page through `query`, build each page's payload from its tree with
+	/// `build`, and move the page's `items` into `payload`. The body is freed
+	/// first, so peak memory is one page's tree plus the result.
+	template <typename Payload, typename Item, typename Build>
 	[[nodiscard]] Result<Payload> paged_into(const LayerQuery& query, Payload payload,
 											 std::vector<Item> Payload::*items,
-											 const Parse& parse) const {
-		Result<void> done = paged(query, [&](const std::string& body) -> Result<void> {
-			Result<Payload> page = parsed([&] { return parse(std::string_view{body}); });
+											 const Build& build) const {
+		Result<void> done = paged(query, [&](std::string& body, const Json& root) -> Result<void> {
+			release(body);
+			Result<Payload> page = parsed([&] { return build(root); });
 			if (!page) {
 				return std::unexpected(std::move(page.error()));
 			}
@@ -439,9 +475,10 @@ Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t d
 	CategoricalOutlookPayload seed;
 	seed.day_offset = day;
 	// GeoJSON, the shape the spc-data categorical parser reads.
-	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
-							 std::move(seed), &CategoricalOutlookPayload::features,
-							 [day](std::string_view body) { return parse_categorical(body, day); });
+	return impl_->paged_into(
+		product_layer(kArcGisOutlooks, descriptor->id, "geojson"), std::move(seed),
+		&CategoricalOutlookPayload::features,
+		[day](const Json& root) { return detail::categorical_from_tree(root, day); });
 }
 
 Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
@@ -456,8 +493,8 @@ Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
 	seed.hazard = normalized;
 	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
 							 std::move(seed), &ProbOutlookPayload::features,
-							 [day, hazard = std::string{normalized}](std::string_view body) {
-								 return parse_probabilistic(body, day, hazard);
+							 [day, normalized](const Json& root) {
+								 return detail::probabilistic_from_tree(root, day, normalized);
 							 });
 }
 
@@ -476,8 +513,8 @@ ArcGISClient::query_conditional_intensity(std::int32_t day, std::string_view haz
 	seed.hazard = normalized;
 	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
 							 &ConditionalIntensityPayload::features,
-							 [day, hazard = std::string{normalized}](std::string_view body) {
-								 return parse_conditional_intensity(body, day, hazard);
+							 [day, hazard = std::string{normalized}](const Json& root) {
+								 return detail::conditional_intensity_from_tree(root, day, hazard);
 							 });
 }
 
@@ -490,8 +527,9 @@ Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) const {
 	Day48OutlookPayload seed;
 	seed.day = day;
 	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
-							 &Day48OutlookPayload::features,
-							 [day](std::string_view body) { return parse_day4_8(body, day); });
+							 &Day48OutlookPayload::features, [day](const Json& root) {
+								 return detail::day4_8_from_tree(root, day);
+							 });
 }
 
 Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) const {
@@ -507,9 +545,11 @@ Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) co
 		LayerQuery query = product_layer(kArcGisFireWeather, descriptor->id);
 		// These layers default to Web Mercator; ask for lon/lat.
 		query.out_spatial_reference = "4326";
-		Result<FireWeatherPayload> merged = impl_->paged_into(
-			query, std::move(payload), &FireWeatherPayload::features,
-			[day, layer](std::string_view body) { return parse_fire_weather(body, day, layer); });
+		Result<FireWeatherPayload> merged =
+			impl_->paged_into(query, std::move(payload), &FireWeatherPayload::features,
+							  [day, layer](const Json& root) {
+								  return detail::fire_weather_from_tree(root, day, layer);
+							  });
 		if (!merged) {
 			return merged;
 		}
@@ -519,9 +559,9 @@ Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) co
 }
 
 Result<MesoscalePayload> ArcGISClient::query_active_md() const {
-	return impl_->paged_into(
-		product_layer(kArcGisMesoscale, 0), MesoscalePayload{}, &MesoscalePayload::discussions,
-		[](std::string_view body) { return parse_mesoscale_discussions(body); });
+	return impl_->paged_into(product_layer(kArcGisMesoscale, 0), MesoscalePayload{},
+							 &MesoscalePayload::discussions,
+							 [](const Json& root) { return detail::mesoscale_from_tree(root); });
 }
 
 Result<std::vector<std::string>> ArcGISClient::query_layer(ArcGISService service,
@@ -546,11 +586,12 @@ Result<std::vector<std::string>> ArcGISClient::query_layer(ArcGISService service
 			break;
 	}
 	std::vector<std::string> pages;
-	Result<void> done = impl_->paged(LayerQuery{base, layer_id, params, {}},
-									 [&pages](std::string&& body) -> Result<void> {
-										 pages.push_back(std::move(body));
-										 return {};
-									 });
+	Result<void> done =
+		impl_->paged(LayerQuery{base, layer_id, params, {}},
+					 [&pages](std::string& body, const Json& /*root*/) -> Result<void> {
+						 pages.push_back(std::move(body));
+						 return {};
+					 });
 	if (!done) {
 		return std::unexpected(std::move(done.error()));
 	}
@@ -616,11 +657,8 @@ Result<WatchPayload> ArchiveClient::watches(std::string_view timestamp) const {
 	if (!timestamp.empty()) {
 		url += "?ts=" + percent_encode(timestamp);
 	}
-	const Result<std::string> body = impl_->fetch(url);
-	if (!body) {
-		return std::unexpected(body.error());
-	}
-	return parsed([&] { return parse_watches(*body); });
+	return built_from(impl_->fetch(url),
+					  [](const Json& root) { return detail::watches_from_tree(root); });
 }
 
 // A start/end pair cannot be told apart by type.
@@ -636,11 +674,8 @@ Result<StormReportPayload> ArchiveClient::storm_reports(std::string_view start_i
 		// IEM filters on `wfos`; it silently ignores `wfo` here.
 		url += "&wfos=" + percent_encode(wfo);
 	}
-	const Result<std::string> body = impl_->fetch(url);
-	if (!body) {
-		return std::unexpected(body.error());
-	}
-	return parsed([&] { return parse_storm_reports(*body); });
+	return built_from(impl_->fetch(url),
+					  [](const Json& root) { return detail::storm_reports_from_tree(root); });
 }
 
 } // namespace spc

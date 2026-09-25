@@ -6,6 +6,7 @@
 
 #include "spc/models/outlook.hpp"
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 
 #include <string>
@@ -37,8 +38,7 @@ std::uint8_t severity_from_label(std::string_view label) noexcept {
 	return 0;
 }
 
-CategoricalOutlookPayload parse_categorical(std::string_view body, std::int32_t day_offset) {
-	const Json root = detail::parse_root_or_throw(body);
+CategoricalOutlookPayload detail::categorical_from_tree(const Json& root, std::int32_t day_offset) {
 	CategoricalOutlookPayload payload;
 	payload.day_offset = day_offset;
 	const Json* features_node = detail::lookup(root, "features");
@@ -81,11 +81,12 @@ CategoricalOutlookPayload parse_categorical(std::string_view body, std::int32_t 
 	return payload;
 }
 
-// The by-value `hazard` matches spc-data's signature.
-ProbOutlookPayload
-parse_probabilistic(std::string_view body, std::int32_t day_offset,
-					std::string hazard) { // NOLINT(performance-unnecessary-value-param)
-	const Json root = detail::parse_root_or_throw(body);
+CategoricalOutlookPayload parse_categorical(std::string_view body, std::int32_t day_offset) {
+	return detail::categorical_from_tree(detail::parse_root_or_throw(body), day_offset);
+}
+
+ProbOutlookPayload detail::probabilistic_from_tree(const Json& root, std::int32_t day_offset,
+												   std::string_view hazard) {
 	ProbOutlookPayload payload;
 	payload.day_offset = day_offset;
 	payload.hazard = hazard;
@@ -121,6 +122,13 @@ parse_probabilistic(std::string_view body, std::int32_t day_offset,
 		}
 	}
 	return payload;
+}
+
+// The by-value `hazard` matches spc-data's signature.
+ProbOutlookPayload
+parse_probabilistic(std::string_view body, std::int32_t day_offset,
+					std::string hazard) { // NOLINT(performance-unnecessary-value-param)
+	return detail::probabilistic_from_tree(detail::parse_root_or_throw(body), day_offset, hazard);
 }
 
 } // namespace spc

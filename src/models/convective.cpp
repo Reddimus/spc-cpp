@@ -4,6 +4,7 @@
 
 #include "spc/models/convective.hpp"
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 
 #include <utility>
@@ -25,8 +26,7 @@ std::uint8_t cig_severity_from_label(std::string_view label) noexcept {
 	return 0;
 }
 
-Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
-	const Json root = detail::parse_root_or_throw(body);
+Day48OutlookPayload detail::day4_8_from_tree(const Json& root, std::int32_t day) {
 	Day48OutlookPayload payload;
 	payload.day = day;
 	const Json* features_node = detail::lookup(root, "features");
@@ -54,9 +54,12 @@ Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
 	return payload;
 }
 
-ConditionalIntensityPayload parse_conditional_intensity(std::string_view body, std::int32_t day,
-														std::string hazard) {
-	const Json root = detail::parse_root_or_throw(body);
+Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
+	return detail::day4_8_from_tree(detail::parse_root_or_throw(body), day);
+}
+
+ConditionalIntensityPayload
+detail::conditional_intensity_from_tree(const Json& root, std::int32_t day, std::string hazard) {
 	ConditionalIntensityPayload payload;
 	payload.day = day;
 	payload.hazard = std::move(hazard);
@@ -82,6 +85,12 @@ ConditionalIntensityPayload parse_conditional_intensity(std::string_view body, s
 		}
 	}
 	return payload;
+}
+
+ConditionalIntensityPayload parse_conditional_intensity(std::string_view body, std::int32_t day,
+														std::string hazard) {
+	return detail::conditional_intensity_from_tree(detail::parse_root_or_throw(body), day,
+												   std::move(hazard));
 }
 
 } // namespace spc

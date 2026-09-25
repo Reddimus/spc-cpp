@@ -12,6 +12,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   one report at a time. On a 624-report day the result holds about 30% less
   memory, since the list no longer keeps the spare room that growth leaves,
   and parsing allocates about 12% fewer bytes.
+- The typed `ArcGISClient` queries parse each page once instead of twice,
+  so they do about half the CPU work and make about half the allocations.
+  Every client also frees a response's text before building the result, so
+  a large response such as a day of storm reports peaks lower in memory.
 
 ### Fixed
 

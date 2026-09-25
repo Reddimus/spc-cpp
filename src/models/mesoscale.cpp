@@ -3,6 +3,7 @@
 
 #include "spc/models/mesoscale.hpp"
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 
 #include <utility>
@@ -11,8 +12,7 @@ namespace spc {
 
 using detail::Json;
 
-MesoscalePayload parse_mesoscale_discussions(std::string_view body) {
-	const Json root = detail::parse_root_or_throw(body);
+MesoscalePayload detail::mesoscale_from_tree(const Json& root) {
 	MesoscalePayload payload;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
@@ -39,6 +39,10 @@ MesoscalePayload parse_mesoscale_discussions(std::string_view body) {
 		payload.discussions.push_back(std::move(md));
 	}
 	return payload;
+}
+
+MesoscalePayload parse_mesoscale_discussions(std::string_view body) {
+	return detail::mesoscale_from_tree(detail::parse_root_or_throw(body));
 }
 
 } // namespace spc
