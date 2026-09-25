@@ -197,6 +197,18 @@ glz::expected<Json, std::string> parse_root(std::string_view body) {
 	return root;
 }
 
+glz::expected<Json, std::string> parse_owned_root(const std::string& body) {
+	Json root{};
+	constexpr glz::opts options{.null_terminated = true};
+	const glz::error_ctx ec = glz::read<options>(root, body);
+	if (!ec) {
+		return root;
+	}
+	// Glaze words some truncations differently when it relies on the
+	// terminator, so take parse_root's message, which parse_* throws.
+	return parse_root(body);
+}
+
 Json parse_root_or_throw(std::string_view body) {
 	glz::expected<Json, std::string> root = parse_root(body);
 	if (!root) {

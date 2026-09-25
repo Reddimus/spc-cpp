@@ -3,6 +3,7 @@
 
 #include "spc/models/storm_report.hpp"
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 
 #include <utility>
@@ -11,8 +12,7 @@ namespace spc {
 
 using detail::Json;
 
-StormReportPayload parse_storm_reports(std::string_view body) {
-	const Json root = detail::parse_root_or_throw(body);
+StormReportPayload detail::storm_reports_from_tree(const Json& root) {
 	StormReportPayload payload;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
@@ -59,6 +59,10 @@ StormReportPayload parse_storm_reports(std::string_view body) {
 		payload.reports.push_back(std::move(sr));
 	}
 	return payload;
+}
+
+StormReportPayload parse_storm_reports(std::string_view body) {
+	return detail::storm_reports_from_tree(detail::parse_root_or_throw(body));
 }
 
 } // namespace spc

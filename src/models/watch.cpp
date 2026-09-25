@@ -4,6 +4,7 @@
 
 #include "spc/models/watch.hpp"
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 
 #include <utility>
@@ -25,8 +26,7 @@ std::int32_t int_field(const Json& obj, const char* key) {
 
 } // namespace
 
-WatchPayload parse_watches(std::string_view body) {
-	const Json root = detail::parse_root_or_throw(body);
+WatchPayload detail::watches_from_tree(const Json& root) {
 	WatchPayload payload;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
@@ -56,6 +56,10 @@ WatchPayload parse_watches(std::string_view body) {
 		payload.watches.push_back(std::move(w));
 	}
 	return payload;
+}
+
+WatchPayload parse_watches(std::string_view body) {
+	return detail::watches_from_tree(detail::parse_root_or_throw(body));
 }
 
 } // namespace spc

@@ -3,6 +3,7 @@ find_package(Threads REQUIRED)
 add_executable(spc_tests
     test_arcgis.cpp
     test_client.cpp
+    test_client_parity.cpp
     test_corpus.cpp
     test_geometry.cpp
     test_golden.cpp

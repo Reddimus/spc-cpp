@@ -69,6 +69,10 @@ double ring_signed_area(const Polygon& ring);
 /// Parse `body`, or return Glaze's formatted error message.
 glz::expected<Json, std::string> parse_root(std::string_view body);
 
+/// `parse_root` for a body held in a std::string, which is faster: the
+/// terminator std::string keeps after its text lets Glaze skip end checks.
+glz::expected<Json, std::string> parse_owned_root(const std::string& body);
+
 // ===== Shared by the product parsers =====
 
 /// Parse `body`; throws std::runtime_error on malformed JSON, which is the

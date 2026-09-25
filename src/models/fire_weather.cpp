@@ -3,6 +3,7 @@
 
 #include "spc/models/fire_weather.hpp"
 
+#include "models/from_tree.hpp"
 #include "models/json.hpp"
 
 #include <string>
@@ -72,9 +73,8 @@ std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
 	return 0;
 }
 
-FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
-									  FireWeatherLayer layer) {
-	const Json root = detail::parse_root_or_throw(body);
+FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t day,
+												  FireWeatherLayer layer) {
 	FireWeatherPayload payload;
 	payload.day = day;
 	const Json* features_node = detail::lookup(root, "features");
@@ -110,6 +110,11 @@ FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
 		}
 	}
 	return payload;
+}
+
+FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
+									  FireWeatherLayer layer) {
+	return detail::fire_weather_from_tree(detail::parse_root_or_throw(body), day, layer);
 }
 
 } // namespace spc
