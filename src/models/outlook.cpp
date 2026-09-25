@@ -6,10 +6,10 @@
 
 #include "spc/models/outlook.hpp"
 
+#include "models/json.hpp"
+
 #include <string>
 #include <utility>
-
-#include "models/json.hpp"
 
 namespace spc {
 

@@ -4,7 +4,7 @@ Responses captured from the live services, mostly on 2026-05-17. Files ending
 in `.synthetic.json` are hand-made for states that had no live data.
 `SHA256SUMS` covers every file here; `make fixtures-check` verifies it.
 
-## SPC static GeoJSON (www.spc.noaa.gov)
+## SPC static GeoJSON (`www.spc.noaa.gov`)
 
 - `day{1,2,3}otlk_cat.nolyr.geojson`: categorical outlooks. Uppercase
   `LABEL`, `ISSUE`, `VALID`, `EXPIRE`; Polygon and MultiPolygon geometry.
@@ -13,7 +13,7 @@ in `.synthetic.json` are hand-made for states that had no live data.
 - `spc_404_no_active_outlook.html`: the HTML page SPC serves with HTTP 404
   when a product is not issued.
 
-## NOAA ArcGIS (mapservices.weather.noaa.gov)
+## NOAA ArcGIS (`mapservices.weather.noaa.gov`)
 
 Pairs captured as Esri JSON (`.esri.json`, `f=json`) and GeoJSON (`.geojson`,
 `f=geojson`) for the parity tests:
@@ -35,7 +35,7 @@ Single captures:
   MapServers. `python3 tools/verify_arcgis_metadata.py` compares it with the
   live services.
 
-## IEM (mesonet.agron.iastate.edu)
+## IEM (`mesonet.agron.iastate.edu`)
 
 - `iem_storm_reports.json`: Local Storm Reports, Point geometry.
 - `iem_spc_watch.json`: SPC watches.

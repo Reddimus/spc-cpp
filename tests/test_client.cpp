@@ -5,6 +5,7 @@
 #include "spc/api.hpp"
 #include "spc/pagination.hpp"
 #include "spc/version.hpp"
+#include "support/fixtures.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -13,8 +14,6 @@
 #include <string_view>
 #include <utility>
 #include <vector>
-
-#include "support/fixtures.hpp"
 
 namespace {
 
@@ -431,11 +430,10 @@ TEST(ArcGISClientRouting, AsksForAStableOrderWhilePaging) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {empty_feature_collection(), empty_feature_collection()};
 	const ArcGISClient client{transport};
-	QueryParams unordered;
-	unordered.order_by_fields.clear();
 
+	// Typed queries order by objectid; raw queries only when asked.
 	ASSERT_TRUE(client.query_categorical(1));
-	ASSERT_TRUE(client.query_layer(ArcGISService::Outlooks, 1, unordered));
+	ASSERT_TRUE(client.query_layer(ArcGISService::Outlooks, 1, {}));
 
 	ASSERT_EQ(transport->requests.size(), 2u);
 	EXPECT_NE(transport->requests[0].find("&orderByFields=objectid"), std::string::npos);

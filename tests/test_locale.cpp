@@ -7,6 +7,7 @@
 #include "spc/models/convective.hpp"
 #include "spc/models/fire_weather.hpp"
 #include "spc/models/outlook.hpp"
+#include "support/fixtures.hpp"
 
 #include <clocale>
 #include <gtest/gtest.h>
@@ -14,8 +15,6 @@
 #include <string>
 #include <string_view>
 #include <vector>
-
-#include "support/fixtures.hpp"
 
 namespace {
 

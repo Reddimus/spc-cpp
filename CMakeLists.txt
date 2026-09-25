@@ -1,5 +1,16 @@
-cmake_minimum_required(VERSION 3.21...3.31)
-project(spc-cpp VERSION 0.3.0 LANGUAGES CXX)
+# Glaze 8.3 needs 3.31.
+cmake_minimum_required(VERSION 3.31)
+
+# include/spc/version.hpp holds the version, so builds without CMake get it too.
+file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/include/spc/version.hpp spc_version_lines
+    REGEX "^#define SPC_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")
+foreach(line IN LISTS spc_version_lines)
+    string(REGEX MATCH "SPC_VERSION_([A-Z]+) ([0-9]+)" _ "${line}")
+    set(spc_version_${CMAKE_MATCH_1} ${CMAKE_MATCH_2})
+endforeach()
+project(spc-cpp
+    VERSION ${spc_version_MAJOR}.${spc_version_MINOR}.${spc_version_PATCH}
+    LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -93,8 +104,6 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(glaze)
 
-configure_file(cmake/version.hpp.in ${PROJECT_BINARY_DIR}/include/spc/version.hpp @ONLY)
-
 add_subdirectory(src)
 
 if(SPC_BUILD_TESTS)
@@ -126,8 +135,6 @@ if(SPC_INSTALL)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
     install(DIRECTORY include/spc DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    install(FILES ${PROJECT_BINARY_DIR}/include/spc/version.hpp
-        DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/spc)
     # The static libraries contain compiled Glaze code, so ship its license.
     install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp)
     install(FILES ${glaze_SOURCE_DIR}/LICENSE

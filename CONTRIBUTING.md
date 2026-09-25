@@ -9,8 +9,9 @@ Thanks for helping. Report security problems privately through
 git clone https://github.com/Reddimus/spc-cpp.git
 cd spc-cpp
 
-# Ubuntu 24.04
-sudo apt install build-essential cmake clang-format libcurl4-openssl-dev
+# Ubuntu 24.04 (its packaged CMake is too old)
+sudo apt install build-essential clang-format libcurl4-openssl-dev pipx
+pipx install cmake
 # macOS
 brew install cmake clang-format curl
 
@@ -103,12 +104,13 @@ Say where the file came from in `tests/fixtures/README.md`.
 
 ## Releasing
 
-1. In a pull request, set `project(spc-cpp VERSION X.Y.Z)` in
-   `CMakeLists.txt`, move `[Unreleased]` to `[X.Y.Z] - YYYY-MM-DD` in
-   `CHANGELOG.md`, and update the `GIT_TAG` and `find_package` versions in
-   `README.md`.
+1. In a pull request, set the three numbers in `include/spc/version.hpp`
+   (CMake reads them from there), move `[Unreleased]` to
+   `[X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, and update the `GIT_TAG` and
+   `find_package` versions in `README.md`. `make test-consumers` fails if
+   the README's `find_package` version does not match.
 2. After it merges, tag `main` and push the tag:
    `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. The release workflow checks that the tag matches the CMake version, runs
+3. The release workflow checks that the tag matches `version.hpp`, runs
    the tests and consumer checks, then publishes the release with the
    changelog section as its notes.

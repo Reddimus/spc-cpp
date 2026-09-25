@@ -31,11 +31,14 @@ int main() {
 
 ## Requirements
 
-- CMake 3.21 or newer
+- CMake 3.31 or newer, which Glaze requires. Ubuntu 24.04 ships 3.28, so
+  install a newer one with `pipx install cmake` or from Kitware's APT
+  repository.
 - GCC 13+ or Clang 18+. CI also builds with the current Apple Clang.
 - libcurl 7.85 or newer
 
-CMake downloads Glaze and GoogleTest during configuration.
+CMake downloads Glaze and GoogleTest during configuration. Consumers of an
+installed package need neither.
 
 ## Build and test
 
@@ -60,6 +63,10 @@ FetchContent_Declare(spc_cpp
 FetchContent_MakeAvailable(spc_cpp)
 target_link_libraries(myapp PRIVATE spc::spc)
 ```
+
+As a subproject, spc-cpp skips its tests, examples, and install rules. If you
+install a library that links `spc::spc`, set `SPC_INSTALL` to `ON` before
+`FetchContent_MakeAvailable` so spc-cpp's targets join an export set.
 
 Or install it and use `find_package`:
 

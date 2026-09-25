@@ -21,6 +21,9 @@ namespace {
 /// when their request finishes.
 constexpr std::size_t kMaxIdleHandles = 8;
 
+/// What `config()` reports on a moved-from client.
+const ClientConfig kMovedFromConfig{};
+
 /// Collects the body up to a ceiling. Returning a short count from the write
 /// callback makes libcurl abort with CURLE_WRITE_ERROR.
 struct BodySink {
@@ -145,9 +148,10 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	}
 
 	const CURLcode rc = curl_easy_perform(curl);
+	// Not a NetworkError: retrying would download the same body again.
 	if (sink.overflowed || rc == CURLE_FILESIZE_EXCEEDED) {
 		return std::unexpected(
-			Error::network("response exceeded ClientConfig::max_response_bytes"));
+			Error::invalid_request("response exceeded ClientConfig::max_response_bytes"));
 	}
 	if (sink.failed) {
 		return std::unexpected(Error::network("out of memory while reading the response"));
@@ -228,6 +232,9 @@ Result<HttpResponse> HttpClient::get(std::string_view path) const {
 }
 
 const ClientConfig& HttpClient::config() const noexcept {
+	if (impl_ == nullptr) {
+		return kMovedFromConfig;
+	}
 	return impl_->config;
 }
 

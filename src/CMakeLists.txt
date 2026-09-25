@@ -17,7 +17,6 @@ spc_configure_target(spc_core)
 target_compile_features(spc_core PUBLIC cxx_std_23)
 target_include_directories(spc_core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
-    $<BUILD_INTERFACE:${PROJECT_BINARY_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
 target_include_directories(spc_core SYSTEM PRIVATE ${SPC_GLAZE_INCLUDE_DIR})

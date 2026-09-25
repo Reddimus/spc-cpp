@@ -3,10 +3,10 @@
 
 #include "spc/models/fire_weather.hpp"
 
+#include "models/json.hpp"
+
 #include <string>
 #include <utility>
-
-#include "models/json.hpp"
 
 namespace spc {
 

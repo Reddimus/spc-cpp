@@ -63,8 +63,8 @@ struct QueryParams {
 	std::string geometry_type; ///< e.g. "esriGeometryEnvelope"
 	std::string spatial_rel{"esriSpatialRelIntersects"};
 	std::string out_fields{"*"};
-	/// Keeps pages stable while paging; empty to omit.
-	std::string order_by_fields{"objectid"};
+	/// e.g. "objectid", which keeps pages stable while paging. Empty omits it.
+	std::string order_by_fields;
 	bool return_geometry{true};
 	std::string f{"json"}; ///< "json" (Esri), "pjson", or "geojson"
 };

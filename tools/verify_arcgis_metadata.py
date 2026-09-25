@@ -2,7 +2,8 @@
 """Compare NOAA's live ArcGIS layers with the checked-in contract.
 
 Checks each MapServer's version and layer ids, names, and parents, then runs a
-one-record query against every feature layer. Needs network access.
+one-record query, ordered by objectid as the SDK's queries are, against every
+feature layer. Needs network access.
 """
 
 from __future__ import annotations
@@ -62,6 +63,7 @@ def main() -> int:
                 "outFields": "*",
                 "returnGeometry": "false",
                 "resultRecordCount": "1",
+                "orderByFields": "objectid",
                 "f": "json",
             }
         )

@@ -92,7 +92,9 @@ struct RetryPolicy {
 		const std::from_chars_result parsed = std::from_chars(
 			header.second.data(), header.second.data() + header.second.size(), seconds);
 		if (parsed.ec == std::errc{} && seconds > 0) {
-			return std::chrono::milliseconds{seconds * 1000};
+			// Cap before converting so a huge value cannot overflow.
+			constexpr std::int64_t kMaxSeconds = std::int64_t{365} * 24 * 60 * 60;
+			return std::chrono::milliseconds{std::min(seconds, kMaxSeconds) * 1000};
 		}
 		return std::chrono::milliseconds{0};
 	}

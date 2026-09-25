@@ -36,7 +36,7 @@ struct ClientConfig {
 	bool verify_ssl{true};
 	/// Largest response body accepted. Bodies are held in memory and parsed
 	/// whole, and an IEM date range can be arbitrarily large. A bigger
-	/// response fails with `ErrorCode::NetworkError`.
+	/// response fails with `ErrorCode::InvalidRequest` and is not retried.
 	std::size_t max_response_bytes{64UL * 1024UL * 1024UL};
 };
 
@@ -77,7 +77,7 @@ public:
 	/// such as `file://`, is refused, including on redirects.
 	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
-	/// The settings this client was built with. Not valid on a moved-from client.
+	/// The settings this client was built with; defaults on a moved-from client.
 	[[nodiscard]] const ClientConfig& config() const noexcept;
 
 private:

@@ -4,12 +4,11 @@
 /// here first.
 
 #include "spc/models/outlook.hpp"
+#include "support/fixtures.hpp"
 
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
-
-#include "support/fixtures.hpp"
 
 namespace {
 

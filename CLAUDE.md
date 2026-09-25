@@ -27,8 +27,9 @@ when you touch ArcGIS layer ids; it needs the network.
 - `HttpClient` is thread-safe through a pool of libcurl handles. Custom
   transports implement `HttpTransport::get`, which must be safe to call
   concurrently.
-- The version comes from `project(spc-cpp VERSION ...)` through the generated
-  `spc/version.hpp`. Bumping `CMakeLists.txt` is the whole version change.
+- `include/spc/version.hpp` is the only place the version lives; CMake reads
+  it. A release also updates the README's `GIT_TAG` and
+  `find_package(spc X.Y REQUIRED)`, which `make test-consumers` checks.
 
 ## Invariants
 
@@ -53,6 +54,5 @@ when you touch ArcGIS layer ids; it needs the network.
 ## Release
 
 Squash-merge pull requests. A `vX.Y.Z` tag triggers `release.yml`, which checks
-the tag against `project(spc-cpp VERSION ...)`, runs the tests and consumer
-checks, and publishes the matching `CHANGELOG.md` section. Steps are in
-CONTRIBUTING.md.
+the tag against `version.hpp`, runs the tests and consumer checks, and
+publishes the matching `CHANGELOG.md` section. Steps are in CONTRIBUTING.md.

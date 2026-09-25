@@ -12,7 +12,7 @@ namespace spc {
 
 enum class ErrorCode {
 	Ok = 0,
-	/// Connection, TLS, timeout, or response-size failure.
+	/// Connection, TLS, or timeout failure.
 	NetworkError,
 	/// HTTP 429 or 503, or the SDK's own rate limit.
 	RateLimited,
@@ -26,7 +26,8 @@ enum class ErrorCode {
 	/// returns it.
 	FeedUnavailable,
 	/// The request cannot succeed as asked: an unsupported day or hazard,
-	/// HTTP 400, or an ArcGIS error such as an invalid parameter.
+	/// HTTP 400, an ArcGIS error such as an invalid parameter, or a response
+	/// larger than `ClientConfig::max_response_bytes`.
 	InvalidRequest,
 	/// The response was not the expected JSON.
 	ParseError,

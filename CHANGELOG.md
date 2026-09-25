@@ -11,11 +11,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `Watch::year`. Watch numbers restart every year, so `number` alone is not
   unique. `StormReport::wfo` names the issuing NWS office.
 - `spc/version.hpp` with `SPC_VERSION_MAJOR`, `SPC_VERSION_MINOR`,
-  `SPC_VERSION_PATCH`, `SPC_VERSION_STRING`, and `spc::version()`.
+  `SPC_VERSION_PATCH`, `SPC_VERSION_STRING`, and `spc::version()`. It is
+  the single source of the version; CMake reads it.
 - `point_in_feature` accepts any feature with `rings`: fire weather, Day 4-8,
   conditional intensity, watches, and mesoscale discussions.
-- `QueryParams::order_by_fields`, default `objectid`, so ArcGIS pages stay
-  stable while paging.
+- `QueryParams::order_by_fields`. The typed `ArcGISClient` queries order by
+  `objectid` so pages stay stable while paging.
 - The `SPC_INSTALL` CMake option.
 - Examples for fire weather and watches.
 
@@ -26,8 +27,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `spc::Json`, and `spc::detail` are gone from the public API.
 - **Breaking:** `find_package(spc X.Y)` accepts only the same minor version
   while the major version is 0, because minor releases may break the API.
-- **Breaking:** CMake 3.21 and libcurl 7.85 are now the minimums, and both
-  are checked at configure time.
+- **Breaking:** building needs CMake 3.31, which Glaze 8.3 already required,
+  and libcurl 7.85. Both are checked at configure time.
 - `HttpClient` is safe to share between threads. Concurrent calls use a pool
   of libcurl handles, which keeps connections open between requests. Client
   methods are `const`, and client string parameters take `std::string_view`.
@@ -40,8 +41,13 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   can arrive in time.
 - `ArcGISClient::query_layer` rejects a `QueryParams::f` other than `json`,
   `pjson`, or `geojson` before sending anything.
-- Tests, examples, and install rules are on by default only in a top-level
-  build, so FetchContent consumers no longer download GoogleTest.
+- **Breaking:** tests, examples, and install rules are on by default only in
+  a top-level build, so FetchContent consumers no longer download
+  GoogleTest. A consumer that installs its own target linking `spc::spc`
+  must now set `SPC_INSTALL=ON`.
+- A response over `ClientConfig::max_response_bytes` is `InvalidRequest`
+  instead of `NetworkError`, so it is no longer downloaded again on every
+  retry.
 - `SPC_ENABLE_LTO` is off by default. LTO put compiler-specific bitcode in the
   installed static libraries, which another compiler or compiler version
   could not link.
@@ -81,6 +87,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   arrived more slowly than configured. A `max_tokens` of 0 made `acquire()`
   wait forever; it is now treated as 1.
 - A default-constructed `Error` left `code` uninitialized.
+- A `Retry-After` value too large for milliseconds overflowed.
+- `HttpClient::config()` on a moved-from client dereferenced null.
 
 ## [0.3.0] - 2026-09-04
 

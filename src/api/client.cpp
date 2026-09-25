@@ -1,6 +1,7 @@
 /// @file client.cpp
 /// @brief StaticFeedClient, ArcGISClient, and ArchiveClient.
 
+#include "models/json.hpp"
 #include "spc/api.hpp"
 #include "spc/pagination.hpp"
 #include "spc/rate_limit.hpp"
@@ -18,8 +19,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#include "models/json.hpp"
 
 namespace spc {
 
@@ -105,6 +104,36 @@ const LayerDescriptor* find_layer(LayerProduct product, std::int32_t day,
 		}
 	}
 	return nullptr;
+}
+
+/// The Day 1-3 probability layer for `day` and `hazard`, or nullptr.
+const LayerDescriptor* day1_3_probability_layer(std::int32_t day, std::string_view hazard) {
+	return day <= 3 ? find_layer(LayerProduct::Probability, day, hazard) : nullptr;
+}
+
+Error unsupported_probability() {
+	return Error::invalid_request(
+		"probabilistic outlook requires tornado, hail, or wind on day 1 or 2, or severe on day 3");
+}
+
+/// The day's two fire-weather layers, in published order, or empty when the
+/// day has none.
+std::vector<const LayerDescriptor*> fire_weather_layers(std::int32_t day) {
+	std::vector<const LayerDescriptor*> layers;
+	for (const LayerDescriptor& descriptor : kLayers) {
+		if (descriptor.product == LayerProduct::FireWeather && descriptor.day == day) {
+			layers.push_back(&descriptor);
+		}
+	}
+	return layers;
+}
+
+FireWeatherLayer fire_weather_layer(std::string_view subtype) {
+	if (subtype == "outlook") {
+		return FireWeatherLayer::Outlook;
+	}
+	return subtype == "dry-thunderstorm" ? FireWeatherLayer::DryThunderstorm
+										 : FireWeatherLayer::WindLowHumidity;
 }
 
 std::shared_ptr<HttpTransport> usable_transport(std::shared_ptr<HttpTransport> transport) {
@@ -240,9 +269,13 @@ std::string page_url(const LayerQuery& query, const ArcGISPager& pager) {
 	return url;
 }
 
-LayerQuery outlook_layer(std::int32_t layer, std::string_view format = "json") {
-	LayerQuery query{kArcGisOutlooks, layer, {}, {}};
+/// A query for one of the SDK's own products: every feature, ordered by
+/// `objectid` (present on all NOAA SPC layers) so pages stay stable.
+LayerQuery product_layer(std::string_view service, std::int32_t layer,
+						 std::string_view format = "json") {
+	LayerQuery query{service, layer, {}, {}};
 	query.params.f = format;
+	query.params.order_by_fields = "objectid";
 	return query;
 }
 
@@ -288,10 +321,8 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 															   std::string_view hazard) const {
 	const std::string_view normalized = normalized_hazard(day, hazard);
-	if (day > 3 || find_layer(LayerProduct::Probability, day, normalized) == nullptr) {
-		return std::unexpected(
-			Error::invalid_request("probabilistic outlook requires tornado, hail, or wind on day 1 "
-								   "or 2, or severe on day 3"));
+	if (day1_3_probability_layer(day, normalized) == nullptr) {
+		return std::unexpected(unsupported_probability());
 	}
 	// SPC names the files day1otlk_torn, day2otlk_hail, ..., and day3otlk_prob.
 	const std::string_view tag = normalized == "tornado" ? std::string_view{"torn"} : normalized;
@@ -408,25 +439,23 @@ Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t d
 	CategoricalOutlookPayload seed;
 	seed.day_offset = day;
 	// GeoJSON, the shape the spc-data categorical parser reads.
-	return impl_->paged_into(outlook_layer(descriptor->id, "geojson"), std::move(seed),
-							 &CategoricalOutlookPayload::features,
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
+							 std::move(seed), &CategoricalOutlookPayload::features,
 							 [day](std::string_view body) { return parse_categorical(body, day); });
 }
 
 Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
 															 std::string_view hazard) const {
 	const std::string_view normalized = normalized_hazard(day, hazard);
-	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, normalized);
-	if (descriptor == nullptr || day > 3) {
-		return std::unexpected(
-			Error::invalid_request("probabilistic outlook requires tornado, hail, or wind on day 1 "
-								   "or 2, or severe on day 3"));
+	const LayerDescriptor* descriptor = day1_3_probability_layer(day, normalized);
+	if (descriptor == nullptr) {
+		return std::unexpected(unsupported_probability());
 	}
 	ProbOutlookPayload seed;
 	seed.day_offset = day;
 	seed.hazard = normalized;
-	return impl_->paged_into(outlook_layer(descriptor->id, "geojson"), std::move(seed),
-							 &ProbOutlookPayload::features,
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
+							 std::move(seed), &ProbOutlookPayload::features,
 							 [day, hazard = std::string{normalized}](std::string_view body) {
 								 return parse_probabilistic(body, day, hazard);
 							 });
@@ -445,7 +474,7 @@ ArcGISClient::query_conditional_intensity(std::int32_t day, std::string_view haz
 	ConditionalIntensityPayload seed;
 	seed.day = day;
 	seed.hazard = normalized;
-	return impl_->paged_into(outlook_layer(descriptor->id), std::move(seed),
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
 							 &ConditionalIntensityPayload::features,
 							 [day, hazard = std::string{normalized}](std::string_view body) {
 								 return parse_conditional_intensity(body, day, hazard);
@@ -460,42 +489,27 @@ Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) const {
 	}
 	Day48OutlookPayload seed;
 	seed.day = day;
-	return impl_->paged_into(outlook_layer(descriptor->id), std::move(seed),
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
 							 &Day48OutlookPayload::features,
 							 [day](std::string_view body) { return parse_day4_8(body, day); });
 }
 
 Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) const {
-	struct Part {
-		std::string_view subtype;
-		FireWeatherLayer layer;
-		const LayerDescriptor* descriptor;
-	};
-	std::array<Part, 2> parts =
-		day <= 2 ? std::array<Part, 2>{{{"outlook", FireWeatherLayer::Outlook, nullptr},
-										{"dry-thunderstorm", FireWeatherLayer::DryThunderstorm,
-										 nullptr}}}
-				 : std::array<Part, 2>{
-					   {{"dry-thunderstorm", FireWeatherLayer::DryThunderstorm, nullptr},
-						{"wind-low-humidity", FireWeatherLayer::WindLowHumidity, nullptr}}};
-	for (Part& part : parts) {
-		part.descriptor = find_layer(LayerProduct::FireWeather, day, part.subtype);
-		if (part.descriptor == nullptr) {
-			return std::unexpected(
-				Error::invalid_request("fire-weather outlook day must be between 1 and 8"));
-		}
+	const std::vector<const LayerDescriptor*> layers = fire_weather_layers(day);
+	if (layers.empty()) {
+		return std::unexpected(
+			Error::invalid_request("fire-weather outlook day must be between 1 and 8"));
 	}
-
 	FireWeatherPayload payload;
 	payload.day = day;
-	for (const Part& part : parts) {
+	for (const LayerDescriptor* descriptor : layers) {
+		const FireWeatherLayer layer = fire_weather_layer(descriptor->subtype);
+		LayerQuery query = product_layer(kArcGisFireWeather, descriptor->id);
 		// These layers default to Web Mercator; ask for lon/lat.
-		const LayerQuery query{kArcGisFireWeather, part.descriptor->id, {}, "4326"};
-		Result<FireWeatherPayload> merged =
-			impl_->paged_into(query, std::move(payload), &FireWeatherPayload::features,
-							  [day, layer = part.layer](std::string_view body) {
-								  return parse_fire_weather(body, day, layer);
-							  });
+		query.out_spatial_reference = "4326";
+		Result<FireWeatherPayload> merged = impl_->paged_into(
+			query, std::move(payload), &FireWeatherPayload::features,
+			[day, layer](std::string_view body) { return parse_fire_weather(body, day, layer); });
 		if (!merged) {
 			return merged;
 		}
@@ -505,9 +519,8 @@ Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) co
 }
 
 Result<MesoscalePayload> ArcGISClient::query_active_md() const {
-	const LayerQuery query{kArcGisMesoscale, 0, {}, {}};
 	return impl_->paged_into(
-		query, MesoscalePayload{}, &MesoscalePayload::discussions,
+		product_layer(kArcGisMesoscale, 0), MesoscalePayload{}, &MesoscalePayload::discussions,
 		[](std::string_view body) { return parse_mesoscale_discussions(body); });
 }
 

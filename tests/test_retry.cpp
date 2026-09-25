@@ -88,6 +88,15 @@ TEST(Retry, HonoursRetryAfterInsteadOfTheComputedBackoff) {
 	EXPECT_GE(waited.count(), 100);
 }
 
+TEST(Retry, AHugeRetryAfterIsCappedInsteadOfOverflowing) {
+	const HttpResponse response{429, "", {{"Retry-After", "99999999999999999"}}};
+
+	const std::chrono::milliseconds delay = retry_after(response);
+
+	EXPECT_GT(delay.count(), 0);
+	EXPECT_LE(delay, std::chrono::hours{24 * 365});
+}
+
 TEST(Retry, IgnoresAnUnparseableRetryAfterAndFallsBackToTheBackoff) {
 	RetryPolicy policy;
 	policy.max_attempts = 2;

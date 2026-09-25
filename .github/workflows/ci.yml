@@ -7,7 +7,8 @@ on:
   workflow_dispatch:
 
 # Jobs build third-party code fetched at configure time, so none of them gets a
-# writable token.
+# writable token. They use the runner image's CMake; Ubuntu's packaged 3.28 is
+# older than the 3.31 Glaze requires.
 permissions:
   contents: read
 
@@ -26,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake clang-format libcurl4-openssl-dev locales
+            build-essential clang-format libcurl4-openssl-dev locales
           # The locale tests skip without a comma-decimal locale.
           sudo locale-gen de_DE.UTF-8
       - name: Build
@@ -49,7 +50,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang-18 cmake libc++-18-dev libc++abi-18-dev \
+            build-essential clang-18 libc++-18-dev libc++abi-18-dev \
             libcurl4-openssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build
@@ -91,7 +92,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build with AddressSanitizer and UndefinedBehaviorSanitizer
         run: >-
@@ -111,7 +112,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build with ThreadSanitizer
         run: >-
@@ -129,7 +130,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang-18 clang-tidy-18 cmake \
+            build-essential clang-18 clang-tidy-18 \
             libc++-18-dev libc++abi-18-dev libcurl4-openssl-dev
       - name: Compile the libraries with clang-tidy
         run: >-
@@ -146,5 +147,5 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev
+            build-essential libcurl4-openssl-dev
       - run: ./tools/test_consumers.sh

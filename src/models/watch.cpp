@@ -4,9 +4,9 @@
 
 #include "spc/models/watch.hpp"
 
-#include <utility>
-
 #include "models/json.hpp"
+
+#include <utility>
 
 namespace spc {
 

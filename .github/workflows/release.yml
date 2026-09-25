@@ -19,14 +19,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - name: Check the tag matches project(spc-cpp VERSION ...)
-        # find_package(spc X.Y) compares against PROJECT_VERSION, so the two
-        # must agree.
+      - name: Check the tag matches include/spc/version.hpp
         run: |
           version="${GITHUB_REF_NAME#v}"
-          cmake_version=$(sed -nE 's/^project\(spc-cpp VERSION ([0-9.]+).*/\1/p' CMakeLists.txt)
-          if [ "$cmake_version" != "${version%%-*}" ]; then
-            echo "::error::tag $GITHUB_REF_NAME does not match CMakeLists.txt version $cmake_version"
+          header_version=$(awk '/^#define SPC_VERSION_(MAJOR|MINOR|PATCH) / {
+            v = v (v == "" ? "" : ".") $3 } END { print v }' include/spc/version.hpp)
+          if [ "$header_version" != "${version%%-*}" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match version.hpp ($header_version)"
             exit 1
           fi
 
@@ -34,7 +33,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential cmake libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev locales
           sudo locale-gen de_DE.UTF-8
 
       - name: Build and test

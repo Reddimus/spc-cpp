@@ -3,6 +3,7 @@
 /// headers, scheme restrictions, and concurrent use.
 
 #include "spc/http_client.hpp"
+#include "support/loopback_server.hpp"
 
 #include <atomic>
 #include <cstddef>
@@ -14,8 +15,6 @@
 #include <thread>
 #include <utility>
 #include <vector>
-
-#include "support/loopback_server.hpp"
 
 namespace {
 
@@ -112,7 +111,8 @@ TEST(HttpClient, RejectsABodyOverTheLimitWhenContentLengthIsKnown) {
 	const Result<HttpResponse> response = client.get(server.url("/big"));
 
 	ASSERT_FALSE(response);
-	EXPECT_EQ(response.error().code, ErrorCode::NetworkError);
+	// Not NetworkError, which with_retry would retry.
+	EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest);
 	EXPECT_NE(response.error().message.find("max_response_bytes"), std::string::npos);
 }
 

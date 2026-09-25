@@ -3,9 +3,9 @@
 
 #include "spc/models/mesoscale.hpp"
 
-#include <utility>
-
 #include "models/json.hpp"
+
+#include <utility>
 
 namespace spc {
 

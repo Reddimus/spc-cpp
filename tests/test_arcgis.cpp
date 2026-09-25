@@ -6,6 +6,7 @@
 /// (f=geojson). `parse_esri_rings` must describe the same areas as the
 /// spc-data GeoJSON walker, so these tests compare point membership.
 
+#include "models/json.hpp"
 #include "spc/geometry.hpp"
 #include "spc/models/convective.hpp"
 #include "spc/models/fire_weather.hpp"
@@ -13,6 +14,7 @@
 #include "spc/models/outlook.hpp"
 #include "spc/models/storm_report.hpp"
 #include "spc/models/watch.hpp"
+#include "support/fixtures.hpp"
 
 #include <algorithm>
 #include <cmath>
@@ -24,9 +26,6 @@
 #include <string>
 #include <utility>
 #include <vector>
-
-#include "models/json.hpp"
-#include "support/fixtures.hpp"
 
 namespace {
 
