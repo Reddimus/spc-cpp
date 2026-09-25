@@ -8,6 +8,7 @@
 #include "support/fixtures.hpp"
 
 #include <cstdint>
+#include <format>
 #include <gtest/gtest.h>
 #include <memory>
 #include <string>
@@ -260,6 +261,8 @@ TEST(ArcGISClientPaging, EncodesParametersAndFetchesEveryPage) {
 
 	ASSERT_TRUE(result);
 	ASSERT_EQ(result->size(), 2u);
+	EXPECT_EQ((*result)[0], truncated_page(2000));
+	EXPECT_EQ((*result)[1], R"({"features":[],"exceededTransferLimit":false})");
 	ASSERT_EQ(transport->requests.size(), 2u);
 	EXPECT_NE(transport->requests[0].find("where=LABEL%20%3D%20%27SLGT%27"), std::string::npos);
 	EXPECT_NE(transport->requests[0].find("outFields=LABEL%2Cvalid"), std::string::npos);
@@ -369,6 +372,27 @@ TEST(ArcGISClientPaging, KeepsTheArcGISErrorDetails) {
 
 	ASSERT_FALSE(result);
 	EXPECT_EQ(result.error().detail, "'where' parameter is invalid.; Check field names.");
+}
+
+TEST(ArcGISClientPaging, ClassifiesArcGIS5xxCodesLikeHttpStatuses) {
+	// HTTP 503 is RateLimited and other 5xx are ServerError, so the same codes
+	// in an ArcGIS error object mean the same.
+	for (const auto& [code, expected] :
+		 {std::pair{503, ErrorCode::RateLimited}, std::pair{500, ErrorCode::ServerError}}) {
+		std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+		transport->responses = {
+			{200,
+			 std::format(R"({{"error":{{"code":{},"message":"Busy","details":[]}}}})", code),
+			 {}},
+		};
+		const ArcGISClient client{transport};
+
+		const Result<CategoricalOutlookPayload> result = client.query_categorical(1);
+
+		ASSERT_FALSE(result) << code;
+		EXPECT_EQ(result.error().code, expected) << code;
+		EXPECT_EQ(result.error().http_status, code);
+	}
 }
 
 // ===== What a 404 means =====

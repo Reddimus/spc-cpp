@@ -25,7 +25,10 @@ def main() -> int:
     actual = {
         path
         for path in FIXTURES.iterdir()
-        if path.is_file() and path.name not in {"README.md", "SHA256SUMS"}
+        # Dotfiles such as a Finder .DS_Store are not fixtures.
+        if path.is_file()
+        and not path.name.startswith(".")
+        and path.name not in {"README.md", "SHA256SUMS"}
     }
     if actual != set(expected):
         missing = sorted(str(path.relative_to(ROOT)) for path in actual - set(expected))

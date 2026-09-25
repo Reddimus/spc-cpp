@@ -429,8 +429,8 @@ struct ArcGISClient::Impl {
 	}
 
 	/// Page through `query`, build each page's payload from its tree with
-	/// `build`, and move the page's `items` into `payload`. The body is freed
-	/// first, so peak memory is one page's tree plus the result.
+	/// `build`, and move the page's `items` into `payload`. Each page's body is
+	/// freed before its payload is built, so the two are never alive together.
 	template <typename Payload, typename Item, typename Build>
 	[[nodiscard]] Result<Payload> paged_into(const LayerQuery& query, Payload payload,
 											 std::vector<Item> Payload::*items,

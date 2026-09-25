@@ -77,7 +77,8 @@ Error Error::from_arcgis(int arcgis_code, const std::string& body) {
 	if (arcgis_code == 404) {
 		// A retired service path. An empty product is HTTP 200 with no features.
 		err.code = ErrorCode::NotFound;
-	} else if (arcgis_code == 429) {
+	} else if (arcgis_code == 429 || arcgis_code == 503) {
+		// The same codes as from_response.
 		err.code = ErrorCode::RateLimited;
 	} else if (arcgis_code >= 500 && arcgis_code <= 599) {
 		err.code = ErrorCode::ServerError;
