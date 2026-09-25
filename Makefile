@@ -54,8 +54,9 @@ tidy:
 
 # Release build in build-bench, without tests and examples.
 bench:
-	@$(MAKE) --no-print-directory build BUILD_DIR=build-bench \
-		CMAKE_ARGS="-DSPC_BUILD_BENCHMARKS=ON -DSPC_BUILD_TESTS=OFF -DSPC_BUILD_EXAMPLES=OFF $(CMAKE_ARGS)"
+	@$(CMAKE) -S . -B build-bench -DCMAKE_BUILD_TYPE=Release -DSPC_BUILD_BENCHMARKS=ON \
+		-DSPC_BUILD_TESTS=OFF -DSPC_BUILD_EXAMPLES=OFF $(CMAKE_ARGS)
+	@$(CMAKE) --build build-bench -j$(NPROC)
 	@./build-bench/benchmarks/spc_benchmarks $(BENCH_ARGS)
 
 coverage:

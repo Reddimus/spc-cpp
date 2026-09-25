@@ -4,13 +4,13 @@
 
 #include "support/allocation_counter.hpp"
 
+#include <array>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
 #include <new>
 #include <stdexcept>
-#include <string>
 #include <vector>
 
 namespace {
@@ -63,43 +63,66 @@ TEST(AllocationCounter, FreeingOlderMemoryMakesRetainedNegative) {
 	EXPECT_LE(stats.retained_bytes, -1000);
 }
 
-TEST(AllocationCounter, CountsEveryOperatorNewForm) {
-	constexpr std::align_val_t kAlignment{64};
+TEST(AllocationCounter, CountsEveryOperatorNewAndDeleteForm) {
+	constexpr std::size_t kSize = 8;
+	constexpr std::uintptr_t kAlignmentBytes = 64;
+	constexpr std::align_val_t kAlignment{kAlignmentBytes};
 	const AllocationProbe probe;
-	void* plain = ::operator new(8);
-	void* array = ::operator new[](8);
-	void* nothrow = ::operator new(8, std::nothrow);
-	void* aligned = ::operator new(8, kAlignment);
-	void* aligned_array = ::operator new[](8, kAlignment, std::nothrow);
-	for (const void* block : {plain, array, nothrow, aligned, aligned_array}) {
-		escaped = block;
+	// Twelve blocks from the eight new forms, one for each delete form.
+	const std::array<void*, 3> single = {::operator new(kSize), ::operator new(kSize, std::nothrow),
+										 ::operator new(kSize)};
+	const std::array<void*, 3> array = {
+		::operator new[](kSize), ::operator new[](kSize, std::nothrow), ::operator new[](kSize)};
+	const std::array<void*, 3> aligned = {::operator new(kSize, kAlignment),
+										  ::operator new(kSize, kAlignment, std::nothrow),
+										  ::operator new(kSize, kAlignment)};
+	const std::array<void*, 3> aligned_array = {::operator new[](kSize, kAlignment),
+												::operator new[](kSize, kAlignment, std::nothrow),
+												::operator new[](kSize, kAlignment)};
+	bool aligned_ok = true;
+	for (const std::array<void*, 3>& blocks : {aligned, aligned_array}) {
+		for (const void* block : blocks) {
+			aligned_ok = aligned_ok && std::bit_cast<std::uintptr_t>(block) % kAlignmentBytes == 0;
+		}
 	}
-	const bool aligned_ok = std::bit_cast<std::uintptr_t>(aligned) % 64 == 0 &&
-							std::bit_cast<std::uintptr_t>(aligned_array) % 64 == 0;
-	::operator delete(plain, 8);
-	::operator delete[](array);
-	::operator delete(nothrow, std::nothrow);
-	::operator delete(aligned, 8, kAlignment);
-	::operator delete[](aligned_array, kAlignment);
+	for (const std::array<void*, 3>& blocks : {single, array, aligned, aligned_array}) {
+		for (const void* block : blocks) {
+			escaped = block;
+		}
+	}
+	::operator delete(single[0]);
+	::operator delete(single[1], kSize);
+	::operator delete(single[2], std::nothrow);
+	::operator delete[](array[0]);
+	::operator delete[](array[1], kSize);
+	::operator delete[](array[2], std::nothrow);
+	::operator delete(aligned[0], kAlignment);
+	::operator delete(aligned[1], kSize, kAlignment);
+	::operator delete(aligned[2], kAlignment, std::nothrow);
+	::operator delete[](aligned_array[0], kAlignment);
+	::operator delete[](aligned_array[1], kSize, kAlignment);
+	::operator delete[](aligned_array[2], kAlignment, std::nothrow);
 	const AllocationStats stats = probe.stats();
 
-	EXPECT_EQ(stats.allocations, 5u);
-	EXPECT_EQ(stats.bytes, 40u);
+	EXPECT_EQ(stats.allocations, 12u);
+	EXPECT_EQ(stats.bytes, 12 * kSize);
+	// Each delete form gave its block back to the count.
 	EXPECT_EQ(stats.retained_bytes, 0);
 	EXPECT_TRUE(aligned_ok);
 }
 
 TEST(AllocationCounter, SeesAllocationsMadeInsideTheStandardLibrary) {
-	// libc++ and libstdc++ compile std::string's growth into their shared
-	// library, so this checks that the replacement reaches it there too.
+	// std::runtime_error copies its message inside libc++ and libstdc++, so
+	// this checks that the replacement reaches allocations made there.
+	// std::string growth would not show that: GCC inlines it from C++20 on.
+	constexpr char kMessage[] = "a message longer than any short-string buffer";
 	const AllocationProbe probe;
-	std::string text;
-	text.append(5000, 'x');
-	escaped = text.data();
+	const std::runtime_error error{kMessage};
+	escaped = error.what();
 	const AllocationStats stats = probe.stats();
 
 	EXPECT_GE(stats.allocations, 1u);
-	EXPECT_GE(stats.bytes, 5001u);
+	EXPECT_GE(stats.bytes, sizeof(kMessage));
 }
 
 TEST(AllocationCounter, StartsEachProbeFromZero) {

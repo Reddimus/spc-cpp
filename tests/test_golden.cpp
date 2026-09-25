@@ -33,6 +33,7 @@
 namespace {
 
 using namespace spc;
+using test::quote;
 using test::read_fixture;
 using test::to_text;
 
@@ -134,7 +135,7 @@ std::string_view excerpt(std::string_view line, std::size_t column) {
 }
 
 /// Where `actual` first departs from `expected`, as a line, a column, and
-/// both versions of that line.
+/// both versions of that line, escaped so a stray \r or tab shows.
 std::string first_difference(std::string_view expected, std::string_view actual) {
 	std::size_t line = 1;
 	std::size_t line_start = 0;
@@ -149,8 +150,8 @@ std::string first_difference(std::string_view expected, std::string_view actual)
 	const std::string_view want = expected.substr(line_start, expected.find('\n', i) - line_start);
 	const std::string_view got = actual.substr(line_start, actual.find('\n', i) - line_start);
 	return std::format("first difference at line {}, column {}\n  expected: {}\n  actual:   {}",
-					   line, i - line_start + 1, excerpt(want, i - line_start),
-					   excerpt(got, i - line_start));
+					   line, i - line_start + 1, quote(excerpt(want, i - line_start)),
+					   quote(excerpt(got, i - line_start)));
 }
 
 class Golden : public testing::TestWithParam<GoldenCase> {};
@@ -191,7 +192,8 @@ TEST(GoldenCoverage, EveryFixtureIsParsedOrListedAsNotParsed) {
 	for (const std::filesystem::directory_entry& entry :
 		 std::filesystem::directory_iterator(SPC_FIXTURES_DIR)) {
 		const std::string name = entry.path().filename().string();
-		if (name == "README.md" || name == "SHA256SUMS") {
+		// Dotfiles such as a Finder .DS_Store are not fixtures.
+		if (name == "README.md" || name == "SHA256SUMS" || name.starts_with('.')) {
 			continue;
 		}
 		EXPECT_TRUE(has_case(name) || std::ranges::find(kNotParsed, name) != kNotParsed.end())
