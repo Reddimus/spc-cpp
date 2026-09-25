@@ -10,10 +10,12 @@ git clone https://github.com/Reddimus/spc-cpp.git
 cd spc-cpp
 
 # Ubuntu 24.04 (its packaged CMake is too old)
-sudo apt install build-essential clang-format libcurl4-openssl-dev pipx
-pipx install cmake
-# macOS (Xcode or its command-line tools provide Apple Clang and libcurl)
+sudo apt install build-essential clang-format libcurl4-openssl-dev
+sudo snap install cmake --classic
+# macOS (Xcode or its command-line tools provide Apple Clang and libcurl).
+# CI formats with clang-format 18; open a new shell after ensurepath.
 brew install cmake pipx
+pipx ensurepath
 pipx install clang-format==18.1.8
 
 make test
@@ -103,7 +105,9 @@ a case there, or a place in its list of fixtures no parser reads. When a
 change to parsed output is intended, rewrite the files and review the diff:
 
 ```bash
+cmake --build build
 SPC_UPDATE_GOLDEN=1 ./build/tests/spc_tests --gtest_filter='Parsers/Golden.*'
+git status --short tests/golden   # new cases are untracked files
 git diff tests/golden
 ```
 
@@ -116,8 +120,8 @@ build, and runs it. `BENCH_ARGS` passes flags through, for example
 Each benchmark also reports the heap use of one call: `allocs`,
 `alloc_bytes`, `peak_bytes`, and `retained_bytes`, the memory the result
 keeps. They repeat exactly from run to run, so compare them directly. On
-macOS, `instructions` per iteration varies by less than 0.1% between runs,
-even on a busy machine, which makes it the steadiest measure of CPU work.
+macOS, `instructions` per iteration moves by under 1% between runs, even on
+a busy machine, which makes it the steadiest measure of CPU work.
 Timings are noisy: to compare two builds, run each with repetitions and
 random interleaving, then compare the results with Google Benchmark's
 `compare.py`, which needs numpy and scipy:
@@ -146,7 +150,7 @@ python3 build-bench/_deps/benchmark-src/tools/compare.py benchmarks \
    (CMake reads them from there), move `[Unreleased]` to
    `[X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, and update the `GIT_TAG` and
    `find_package` versions in `README.md`. `make test-consumers` fails if
-   the README's `find_package` version does not match.
+   either README version does not match.
 2. After it merges, tag `main` and push the tag:
    `git tag vX.Y.Z && git push origin vX.Y.Z`.
 3. The release workflow checks that the tag matches `version.hpp`, runs

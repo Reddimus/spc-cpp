@@ -16,9 +16,10 @@ enum class ErrorCode {
 	NetworkError,
 	/// HTTP 429 or 503, or the SDK's own rate limit.
 	RateLimited,
-	/// HTTP 5xx, or an ArcGIS query that never finished paging.
+	/// HTTP 5xx other than 503, or an ArcGIS query that never finished paging.
 	ServerError,
-	/// A real fault: a bad URL, a retired product, or a wrong ArcGIS layer.
+	/// A URL or ArcGIS service that no longer exists: a bug to report. A bad
+	/// layer id is `InvalidRequest`.
 	NotFound,
 	/// SPC has not issued this product right now; its static feeds answer
 	/// HTTP 404. This is normal (day 1 probabilities overnight, for example),
@@ -29,7 +30,8 @@ enum class ErrorCode {
 	/// HTTP 400, an ArcGIS error such as an invalid parameter, or a response
 	/// larger than `ClientConfig::max_response_bytes`.
 	InvalidRequest,
-	/// The response was not the expected JSON.
+	/// The body was not valid JSON. Valid JSON without the expected fields
+	/// parses to an empty result.
 	ParseError,
 	Unknown
 };
