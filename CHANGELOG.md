@@ -6,14 +6,24 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-09-25
+
 ### Added
 
 - `make bench` runs a Google Benchmark suite over every parser and the
   ArcGIS and static-feed clients. Each benchmark also reports the
   allocations and peak and retained heap of one call, and on macOS the
-  instructions per call. The
-  `SPC_BUILD_BENCHMARKS` option that builds it is off by default and
-  installs nothing.
+  instructions per call. The `SPC_BUILD_BENCHMARKS` option that builds it is
+  off by default and installs nothing.
+
+### Changed
+
+- CI's macOS job builds the way the README does, with Apple Clang and the
+  system libcurl, as a universal arm64 and x86_64 binary for macOS 13.4. It
+  tests both slices and the consumer checks, then runs the same binary on
+  macOS 15 and on an Intel Mac.
+- The README leads with a copy-paste quick start and a table of which call
+  fetches each product.
 
 ### Fixed
 
@@ -24,15 +34,6 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   use the stream parser, so the earliest supported macOS is 13.4.
 - The README's error table was wrong about `NotFound`, `ServerError`, and
   `ParseError`, omitted `Unknown`, and overstated Clang 18 support.
-
-### Changed
-
-- CI's macOS job builds the way the README does, with Apple Clang and the
-  system libcurl, as a universal arm64 and x86_64 binary for macOS 13.4. It
-  tests both slices and the consumer checks, then runs the same binary on
-  macOS 15 and on an Intel Mac.
-- The README leads with a copy-paste quick start and a table of which call
-  fetches each product.
 
 ## [0.4.0] - 2026-09-25
 
