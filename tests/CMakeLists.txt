@@ -5,6 +5,7 @@ add_executable(spc_tests
     test_client.cpp
     test_corpus.cpp
     test_geometry.cpp
+    test_golden.cpp
     test_locale.cpp
     test_parser.cpp
     test_rate_limit.cpp
@@ -25,6 +26,7 @@ target_include_directories(spc_tests PRIVATE
 target_include_directories(spc_tests SYSTEM PRIVATE ${glaze_SOURCE_DIR}/include)
 target_compile_definitions(spc_tests PRIVATE
     SPC_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
+    SPC_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden"
     SPC_PROJECT_VERSION="${PROJECT_VERSION}"
 )
 

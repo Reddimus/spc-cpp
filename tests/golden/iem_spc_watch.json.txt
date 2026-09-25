@@ -1,0 +1,4 @@
+WatchPayload watches=3
+number=139 year=2024 type="TOR" sel="SEL9" is_pds=false max_hail_size=2.5 max_wind_gust_knots=60 spc_url="https://www.spc.noaa.gov/products/watch/2024/ww0139.html" issued_at="2024-04-26T15:10:00Z" expires_at="2024-04-26T23:00:00Z" rings=((-98.27 32.02, -94.29 34.12, -94.29 32.38, -98.27 30.28, -98.27 32.02))
+number=140 year=2024 type="TOR" sel="SEL0" is_pds=false max_hail_size=3 max_wind_gust_knots=60 spc_url="https://www.spc.noaa.gov/products/watch/2024/ww0140.html" issued_at="2024-04-26T17:55:00Z" expires_at="2024-04-27T00:03:00Z" rings=((-99.22 42.89, -95.07 42.02, -95.07 39.7, -99.22 40.57, -99.22 42.89))
+number=141 year=2024 type="TOR" sel="SEL1" is_pds=false max_hail_size=3 max_wind_gust_knots=60 spc_url="https://www.spc.noaa.gov/products/watch/2024/ww0141.html" issued_at="2024-04-26T19:10:00Z" expires_at="2024-04-27T01:07:00Z" rings=((-94.11 38, -94.92 33.93, -97.19 33.93, -96.5 38, -94.11 38))

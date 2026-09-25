@@ -1,0 +1,2 @@
+Day48OutlookPayload day=4 features=1
+day=4 label="" probability=0.15 issued_at="" valid_from="2026-09-03T12:00:00Z" valid_until="2026-09-07T12:00:00Z" rings=((-100 40, -99 40, -99 39, -100 39, -100 40))
