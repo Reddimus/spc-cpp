@@ -1,4 +1,4 @@
-# Glaze 8.3 needs 3.31.
+# Glaze needs 3.31.
 cmake_minimum_required(VERSION 3.31)
 
 # include/spc/version.hpp holds the version, so builds without CMake get it too.
@@ -100,12 +100,11 @@ find_package(CURL 7.85 REQUIRED)
 include(FetchContent)
 
 # Glaze reads SPC's loosely shaped JSON. It is a private build dependency: no
-# installed header includes it. kalshi-cpp pins the same version, so a build
-# that fetches both SDKs gets a single glaze target.
+# installed header includes it.
 FetchContent_Declare(
     glaze
     GIT_REPOSITORY https://github.com/stephenberry/glaze.git
-    GIT_TAG v8.3.0
+    GIT_TAG v9.0.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(glaze)
