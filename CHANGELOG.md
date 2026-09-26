@@ -6,10 +6,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.4] - 2026-09-26
+
 ### Changed
 
 - Glaze is now 9.0.0. Parsing gives the same results and allocates the same
-  memory, and it runs up to 7% fewer instructions on the larger fixtures.
+  memory, and it runs up to 7% fewer instructions.
 
 ### Fixed
 
