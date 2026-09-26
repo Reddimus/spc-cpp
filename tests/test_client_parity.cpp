@@ -327,6 +327,7 @@ TEST(ClientParity, AMalformedBodyFailsWithTheParsersMessage) {
 		R"({"features":[)",
 		R"({"features":[1,2)",
 		R"({"a":"x")",
+		"1e",
 		read_fixture("arcgis_day1_categorical.geojson").substr(0, 5000),
 	};
 

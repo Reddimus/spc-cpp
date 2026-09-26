@@ -6,6 +6,17 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Glaze is now 9.0.0. Parsing gives the same results and allocates the same
+  memory, and it runs up to 7% fewer instructions on the larger fixtures.
+
+### Fixed
+
+- A body made of nothing but a number with an empty exponent, such as `1e`,
+  parsed as valid JSON and gave an empty result. The clients now return
+  `ParseError` and the `parse_*` functions throw, as for any malformed body.
+
 ## [0.4.3] - 2026-09-25
 
 ### Fixed

@@ -6,6 +6,7 @@
 #include "spc/models/outlook.hpp"
 #include "support/fixtures.hpp"
 
+#include <format>
 #include <gtest/gtest.h>
 #include <stdexcept>
 #include <string>
@@ -70,6 +71,18 @@ TEST(Corpus, MalformedBodyThrows) {
 	// SPC's HTML 404 page is the usual malformed body.
 	EXPECT_THROW((void)parse_categorical(read_fixture("spc_404_no_active_outlook.html"), 1),
 				 std::runtime_error);
+}
+
+TEST(Corpus, RejectsMalformedNumbers) {
+	// Glaze reads a number that ends the input on a different path from one
+	// followed by more JSON, so check both.
+	for (const std::string_view number :
+		 {"1e", "1e+", "1E-", "1.", ".5", "01", "-", "+1", "1.e5"}) {
+		EXPECT_THROW((void)parse_categorical(number, 1), std::runtime_error) << number;
+		const std::string body =
+			std::format(R"({{"features":[{{"properties":{{"DN":{}}}}}]}})", number);
+		EXPECT_THROW((void)parse_categorical(body, 1), std::runtime_error) << body;
+	}
 }
 
 TEST(Corpus, ParsesOnlyTheViewItIsGiven) {
