@@ -179,8 +179,10 @@ jobs:
       - name: Configure
         shell: pwsh
         run: |
-          git -C "$env:VCPKG_INSTALLATION_ROOT" fetch --quiet origin master
-          git -C "$env:VCPKG_INSTALLATION_ROOT" reset --quiet --hard origin/master
+          $PSNativeCommandUseErrorActionPreference = $true
+          $baseline = (Get-Content vcpkg.json | ConvertFrom-Json).'builtin-baseline'
+          git -C "$env:VCPKG_INSTALLATION_ROOT" fetch --quiet --depth 1 origin $baseline
+          git -C "$env:VCPKG_INSTALLATION_ROOT" checkout --quiet --detach $baseline
           & "$env:VCPKG_INSTALLATION_ROOT/bootstrap-vcpkg.bat" -disableMetrics
           cmake -S . -B build `
             "-DCMAKE_TOOLCHAIN_FILE=$env:VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake" `

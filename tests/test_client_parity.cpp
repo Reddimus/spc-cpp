@@ -330,6 +330,8 @@ TEST(ClientParity, AMalformedBodyFailsWithTheParsersMessage) {
 		"1e",
 		"1e+",
 		"1E-",
+		R"({"features":[]}garbage)",
+		std::string{R"({"features":[]})"} + '\0' + "{}",
 		read_fixture("arcgis_day1_categorical.geojson").substr(0, 5000),
 	};
 

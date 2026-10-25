@@ -54,7 +54,8 @@ struct RetryPolicy {
 	const std::chrono::milliseconds maximum =
 		std::max(policy.max_delay, std::chrono::milliseconds::zero());
 	const double max_ms = static_cast<double>(maximum.count());
-	double delay_ms = static_cast<double>(std::max(policy.initial_delay.count(), std::int64_t{0}));
+	double delay_ms = static_cast<double>(
+		std::max(policy.initial_delay, std::chrono::milliseconds::zero()).count());
 	const double multiplier =
 		std::isfinite(policy.backoff_multiplier) ? std::max(policy.backoff_multiplier, 0.0) : 1.0;
 	for (std::uint8_t i = 1; i < attempt; ++i) {

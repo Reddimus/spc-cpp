@@ -147,8 +147,6 @@ TEST(Retry, IgnoresAnUnparseableRetryAfterAndFallsBackToTheBackoff) {
 	EXPECT_LT(waited.count(), 1000);
 }
 
-} // namespace
-
 TEST(Retry, InvalidAndExtremePoliciesRemainBounded) {
 	spc::RetryPolicy policy;
 	policy.jitter_factor = 0.0;
@@ -164,3 +162,5 @@ TEST(Retry, InvalidAndExtremePoliciesRemainBounded) {
 	policy.backoff_multiplier = std::numeric_limits<double>::max();
 	EXPECT_EQ(spc::calculate_retry_delay(255, policy), policy.max_delay);
 }
+
+} // namespace

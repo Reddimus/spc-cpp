@@ -15,7 +15,8 @@ add_executable(spc_tests
 target_sources(spc_tests PRIVATE test_http_client.cpp)
 if(WIN32)
     target_link_libraries(spc_tests PRIVATE ws2_32)
-    target_compile_definitions(spc_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
+    target_compile_definitions(spc_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX
+        _CRT_SECURE_NO_WARNINGS)
 endif()
 
 spc_set_warnings(spc_tests)
