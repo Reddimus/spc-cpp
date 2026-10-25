@@ -4,7 +4,7 @@
 /// allocation_counter.cpp replaces the global operator new and delete, so
 /// only the benchmarks and their own tests link it. Memory that bypasses
 /// operator new is not seen: Glaze grows ordered_small_map index blocks with
-/// std::realloc.
+/// std::realloc. Shared MSVC runtime DLLs also bypass these replacements.
 
 #pragma once
 

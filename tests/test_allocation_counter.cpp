@@ -112,7 +112,7 @@ TEST(AllocationCounter, CountsEveryOperatorNewAndDeleteForm) {
 	EXPECT_TRUE(aligned_ok);
 }
 
-TEST(AllocationCounter, SeesStandardLibraryNewDeleteResourceAllocations) {
+TEST(AllocationCounter, StandardLibraryAllocationVisibilityMatchesTheRuntime) {
 	// This resource must use replaceable operator new; exception storage may use malloc.
 	std::pmr::memory_resource* resource = std::pmr::new_delete_resource();
 	constexpr std::size_t kBytes = 100;
@@ -122,8 +122,14 @@ TEST(AllocationCounter, SeesStandardLibraryNewDeleteResourceAllocations) {
 	const AllocationStats stats = probe.stats();
 	resource->deallocate(block, kBytes);
 
+#if defined(_MSVC_STL_VERSION) && defined(_DLL)
+	// Windows runtime DLLs do not interpose the executable's replacements.
+	EXPECT_EQ(stats.allocations, 0u);
+	EXPECT_EQ(stats.bytes, 0u);
+#else
 	EXPECT_GE(stats.allocations, 1u);
 	EXPECT_GE(stats.bytes, kBytes);
+#endif
 }
 
 TEST(AllocationCounter, StartsEachProbeFromZero) {

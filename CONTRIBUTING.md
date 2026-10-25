@@ -121,7 +121,8 @@ build, and runs it. `BENCH_ARGS` passes flags through, for example
 
 Each benchmark also reports the heap use of one call: `allocs`,
 `alloc_bytes`, `peak_bytes`, and `retained_bytes`, the memory the result
-keeps. Compare heap counters with the same build and input. On macOS,
+keeps. MSVC runtime DLL allocations are outside this counter.
+Compare heap counters with the same build and input. On macOS,
 `instructions` per iteration also helps compare CPU work. Timings vary: to compare two builds, run each with repetitions and
 random interleaving, then compare the results with Google Benchmark's
 `compare.py`, which needs numpy and scipy:
