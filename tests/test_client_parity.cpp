@@ -365,4 +365,13 @@ TEST(ClientParity, ATypedQueryRejectsATruncatedPageWithNoRecords) {
 	}
 }
 
+TEST(ClientParity, TrailingJsonWhitespaceIsAcceptedByEveryClient) {
+	const std::shared_ptr<FixedTransport> transport =
+		std::make_shared<FixedTransport>("{\"features\":[]} \r\n\t");
+	EXPECT_TRUE(ArcGISClient{transport}.query_categorical(1));
+	EXPECT_TRUE(ArcGISClient{transport}.query_layer(ArcGISService::Outlooks, 1, {}));
+	EXPECT_TRUE(StaticFeedClient{transport}.day_categorical(1));
+	EXPECT_TRUE(ArchiveClient{transport}.watches());
+}
+
 } // namespace
