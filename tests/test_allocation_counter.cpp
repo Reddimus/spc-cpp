@@ -9,7 +9,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
-#include <memory_resource>
 #include <new>
 #include <stdexcept>
 #include <vector>
@@ -113,22 +112,20 @@ TEST(AllocationCounter, CountsEveryOperatorNewAndDeleteForm) {
 }
 
 TEST(AllocationCounter, StandardLibraryAllocationVisibilityMatchesTheRuntime) {
-	// This resource must use replaceable operator new; exception storage may use malloc.
-	std::pmr::memory_resource* resource = std::pmr::new_delete_resource();
-	constexpr std::size_t kBytes = 100;
+	constexpr char kMessage[] = "a message longer than any short-string buffer";
 	const AllocationProbe probe;
-	void* block = resource->allocate(kBytes);
-	escaped = block;
+	const std::runtime_error error{kMessage};
+	escaped = error.what();
 	const AllocationStats stats = probe.stats();
-	resource->deallocate(block, kBytes);
 
-#if defined(_MSVC_STL_VERSION) && defined(_DLL)
-	// Windows runtime DLLs do not interpose the executable's replacements.
+#if defined(_MSVC_STL_VERSION)
+	// MSVC exception storage uses CRT allocation instead of replaceable operator new.
 	EXPECT_EQ(stats.allocations, 0u);
 	EXPECT_EQ(stats.bytes, 0u);
 #else
+	// libc++ and libstdc++ allocate the message through operator new.
 	EXPECT_GE(stats.allocations, 1u);
-	EXPECT_GE(stats.bytes, kBytes);
+	EXPECT_GE(stats.bytes, sizeof(kMessage));
 #endif
 }
 
