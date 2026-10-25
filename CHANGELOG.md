@@ -6,6 +6,22 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-10-25
+
+### Fixed
+
+- Reject trailing data after JSON values.
+- Keep rate-limit and server-error retry policies independent, reject partial
+  `Retry-After` values, and bound invalid or extreme retry delays.
+- Avoid overflow in rate-limit intervals and wait deadlines.
+- Check formatting before commits without changing staged files.
+- Refresh the CMake project version when its header changes.
+
+### Added
+
+- Windows CI and portable loopback HTTP tests using Winsock.
+- Repo-scoped weather MCP and Greptile review configuration.
+
 ## [0.4.4] - 2026-09-26
 
 ### Changed

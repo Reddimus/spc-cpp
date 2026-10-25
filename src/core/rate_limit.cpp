@@ -49,7 +49,9 @@ void RateLimiter::refill() noexcept {
 		last_refill_ = now;
 		return;
 	}
-	const std::int64_t earned = (now - last_refill_) / config_.refill_interval;
+	const std::int64_t earned =
+		std::chrono::duration_cast<std::chrono::milliseconds>(now - last_refill_).count() /
+		config_.refill_interval.count();
 	if (earned <= 0) {
 		return;
 	}
@@ -74,7 +76,12 @@ std::optional<RateLimiter::Clock::duration> RateLimiter::take_or_wait_time() noe
 		}
 		return std::nullopt;
 	}
-	const Clock::duration wait = last_refill_ + config_.refill_interval - Clock::now();
+	const Clock::duration interval =
+		config_.refill_interval >=
+				std::chrono::duration_cast<std::chrono::milliseconds>(Clock::duration::max())
+			? Clock::duration::max()
+			: std::chrono::duration_cast<Clock::duration>(config_.refill_interval);
+	const Clock::duration wait = interval - (Clock::now() - last_refill_);
 	return std::max(wait, Clock::duration::zero());
 }
 
@@ -92,7 +99,13 @@ bool RateLimiter::acquire() {
 }
 
 bool RateLimiter::acquire_for(std::chrono::milliseconds max_wait) {
-	return acquire_until(Clock::now() + max_wait);
+	const Clock::time_point now = Clock::now();
+	if (max_wait <= std::chrono::milliseconds::zero()) {
+		return acquire_until(now);
+	}
+	const std::chrono::milliseconds remaining =
+		std::chrono::duration_cast<std::chrono::milliseconds>(Clock::time_point::max() - now);
+	return acquire_until(max_wait >= remaining ? Clock::time_point::max() : now + max_wait);
 }
 
 bool RateLimiter::acquire_until(std::optional<Clock::time_point> deadline) {
@@ -110,7 +123,7 @@ bool RateLimiter::acquire_until(std::optional<Clock::time_point> deadline) {
 		if (!wait) {
 			return true;
 		}
-		if (deadline && Clock::now() + *wait > *deadline) {
+		if (deadline && *wait > *deadline - Clock::now()) {
 			return false;
 		}
 		std::this_thread::sleep_for(*wait);
@@ -120,7 +133,9 @@ bool RateLimiter::acquire_until(std::optional<Clock::time_point> deadline) {
 std::uint16_t RateLimiter::available_tokens() const noexcept {
 	const std::lock_guard<std::mutex> lock(mutex_);
 	// What refill() would add now, without changing state.
-	const std::int64_t earned = (Clock::now() - last_refill_) / config_.refill_interval;
+	const std::int64_t earned =
+		std::chrono::duration_cast<std::chrono::milliseconds>(Clock::now() - last_refill_).count() /
+		config_.refill_interval.count();
 	const std::int64_t total =
 		static_cast<std::int64_t>(tokens_) + std::max<std::int64_t>(earned, 0);
 	return static_cast<std::uint16_t>(

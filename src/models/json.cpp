@@ -10,6 +10,14 @@
 
 namespace spc::detail {
 
+namespace {
+
+struct JsonReadOptions : glz::opts {
+	bool validate_trailing_whitespace{true};
+};
+
+} // namespace
+
 const Json* lookup(const Json& obj, const char* key) {
 	if (!obj.is_object()) {
 		return nullptr;
@@ -191,7 +199,7 @@ std::vector<Polygon> parse_esri_rings(const Json& geom) {
 glz::expected<Json, std::string> parse_root(std::string_view body) {
 	Json root{};
 	// A view can end mid-buffer, so don't let Glaze assume a terminator after it.
-	constexpr glz::opts options{.null_terminated = false};
+	constexpr JsonReadOptions options{{.null_terminated = false}};
 	const glz::error_ctx ec = glz::read<options>(root, body);
 	if (ec) {
 		return glz::unexpected(glz::format_error(ec, body));
@@ -201,7 +209,7 @@ glz::expected<Json, std::string> parse_root(std::string_view body) {
 
 glz::expected<Json, std::string> parse_owned_root(const std::string& body) {
 	Json root{};
-	constexpr glz::opts options{.null_terminated = true};
+	constexpr JsonReadOptions options{{.null_terminated = true}};
 	const glz::error_ctx ec = glz::read<options>(root, body);
 	if (!ec) {
 		return root;

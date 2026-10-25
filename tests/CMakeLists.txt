@@ -12,9 +12,10 @@ add_executable(spc_tests
     test_rate_limit.cpp
     test_retry.cpp
 )
-# The loopback HTTP server uses POSIX sockets.
-if(NOT WIN32)
-    target_sources(spc_tests PRIVATE test_http_client.cpp)
+target_sources(spc_tests PRIVATE test_http_client.cpp)
+if(WIN32)
+    target_link_libraries(spc_tests PRIVATE ws2_32)
+    target_compile_definitions(spc_tests PRIVATE WIN32_LEAN_AND_MEAN NOMINMAX)
 endif()
 
 spc_set_warnings(spc_tests)

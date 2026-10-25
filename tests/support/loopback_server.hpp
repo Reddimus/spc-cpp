@@ -1,6 +1,6 @@
 /// @file loopback_server.hpp
 /// @brief A tiny HTTP/1.1 server on 127.0.0.1 for testing HttpClient against
-/// a real socket. POSIX only.
+/// a real socket.
 ///
 /// It serves one connection at a time and closes each after one response.
 /// The handler returns the complete raw response, so tests control the
@@ -8,25 +8,78 @@
 
 #pragma once
 
-#include <arpa/inet.h>
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <mutex>
-#include <netinet/in.h>
-#include <poll.h>
 #include <stdexcept>
 #include <string>
 #include <string_view>
-#include <sys/socket.h>
-#include <sys/time.h>
 #include <thread>
-#include <unistd.h>
 #include <utility>
 #include <vector>
 
+#ifdef _WIN32
+#include <winsock2.h>
+#include <ws2tcpip.h>
+#else
+#include <arpa/inet.h>
+#include <netinet/in.h>
+#include <poll.h>
+#include <sys/socket.h>
+#include <sys/time.h>
+#include <unistd.h>
+#endif
+
 namespace spc::test {
+
+namespace socket_detail {
+#ifdef _WIN32
+using Socket = SOCKET;
+using AddressLength = int;
+using IoResult = int;
+constexpr Socket kInvalidSocket = INVALID_SOCKET;
+constexpr int kShutdownWrite = SD_SEND;
+inline void close_socket(Socket socket) {
+	(void)::closesocket(socket);
+}
+inline int wait_for_connection(Socket socket) {
+	WSAPOLLFD waiting{socket, POLLRDNORM, 0};
+	return ::WSAPoll(&waiting, 1, 50);
+}
+inline void initialize() {
+	struct Winsock {
+		Winsock() {
+			WSADATA data{};
+			if (::WSAStartup(MAKEWORD(2, 2), &data) != 0) {
+				throw std::runtime_error("WSAStartup() failed");
+			}
+		}
+		~Winsock() { (void)::WSACleanup(); }
+	};
+	static const Winsock initialized;
+}
+#else
+using Socket = int;
+using AddressLength = socklen_t;
+using IoResult = ssize_t;
+constexpr Socket kInvalidSocket = -1;
+constexpr int kShutdownWrite = SHUT_WR;
+inline void close_socket(Socket socket) {
+	(void)::close(socket);
+}
+inline int wait_for_connection(Socket socket) {
+	pollfd waiting{socket, POLLIN, 0};
+	return ::poll(&waiting, 1, 50);
+}
+inline void initialize() {}
+#endif
+inline void set_option(Socket socket, int option, const void* value, int length) {
+	(void)::setsockopt(socket, SOL_SOCKET, option, static_cast<const char*>(value), length);
+}
+} // namespace socket_detail
 
 struct LoopbackRequest {
 	std::string target; ///< e.g. "/final?x=1"
@@ -47,22 +100,23 @@ public:
 	using Handler = std::function<std::string(const LoopbackRequest&)>;
 
 	explicit LoopbackServer(Handler handler) : handler_(std::move(handler)) {
+		socket_detail::initialize();
 		listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
-		if (listener_ < 0) {
+		if (listener_ == socket_detail::kInvalidSocket) {
 			throw std::runtime_error("socket() failed");
 		}
 		const int reuse = 1;
-		(void)::setsockopt(listener_, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+		socket_detail::set_option(listener_, SO_REUSEADDR, &reuse, sizeof(reuse));
 		sockaddr_in address{};
 		address.sin_family = AF_INET;
 		address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
 		address.sin_port = 0; // any free port
 		if (::bind(listener_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
 			::listen(listener_, 64) != 0) {
-			::close(listener_);
+			socket_detail::close_socket(listener_);
 			throw std::runtime_error("bind() or listen() failed");
 		}
-		socklen_t length = sizeof(address);
+		socket_detail::AddressLength length = sizeof(address);
 		(void)::getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length);
 		port_ = ntohs(address.sin_port);
 		thread_ = std::thread([this] { serve(); });
@@ -71,7 +125,7 @@ public:
 	~LoopbackServer() {
 		stop_.store(true);
 		thread_.join();
-		::close(listener_);
+		socket_detail::close_socket(listener_);
 	}
 
 	LoopbackServer(const LoopbackServer&) = delete;
@@ -93,32 +147,34 @@ public:
 private:
 	void serve() {
 		while (!stop_.load()) {
-			pollfd waiting{listener_, POLLIN, 0};
-			// Wake regularly to notice stop_; shutdown() does not interrupt
-			// accept() on macOS.
-			if (::poll(&waiting, 1, 50) <= 0) {
+			if (socket_detail::wait_for_connection(listener_) <= 0) {
 				continue;
 			}
-			const int client = ::accept(listener_, nullptr, nullptr);
-			if (client < 0) {
+			const socket_detail::Socket client = ::accept(listener_, nullptr, nullptr);
+			if (client == socket_detail::kInvalidSocket) {
 				continue;
 			}
 			handle(client);
-			::close(client);
+			socket_detail::close_socket(client);
 		}
 	}
 
-	void handle(int client) {
-		timeval timeout{2, 0};
-		(void)::setsockopt(client, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	void handle(socket_detail::Socket client) {
+#ifdef _WIN32
+		const DWORD timeout = 2000;
+#else
+		const timeval timeout{2, 0};
+#endif
+		socket_detail::set_option(client, SO_RCVTIMEO, &timeout, sizeof(timeout));
 #ifdef SO_NOSIGPIPE
 		const int no_sigpipe = 1;
-		(void)::setsockopt(client, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
+		socket_detail::set_option(client, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
 #endif
 		std::string raw;
 		std::vector<char> buffer(4096);
 		while (raw.find("\r\n\r\n") == std::string::npos && raw.size() < 65536) {
-			const ssize_t received = ::recv(client, buffer.data(), buffer.size(), 0);
+			const socket_detail::IoResult received =
+				::recv(client, buffer.data(), static_cast<int>(buffer.size()), 0);
 			if (received <= 0) {
 				return;
 			}
@@ -130,7 +186,7 @@ private:
 			requests_.push_back(request);
 		}
 		send_all(client, handler_(request));
-		(void)::shutdown(client, SHUT_WR);
+		(void)::shutdown(client, socket_detail::kShutdownWrite);
 	}
 
 	static LoopbackRequest parse(const std::string& raw) {
@@ -161,7 +217,7 @@ private:
 		return request;
 	}
 
-	static void send_all(int client, const std::string& response) {
+	static void send_all(socket_detail::Socket client, const std::string& response) {
 #ifdef MSG_NOSIGNAL
 		constexpr int kFlags = MSG_NOSIGNAL;
 #else
@@ -169,8 +225,9 @@ private:
 #endif
 		std::size_t sent = 0;
 		while (sent < response.size()) {
-			const ssize_t written =
-				::send(client, response.data() + sent, response.size() - sent, kFlags);
+			const socket_detail::IoResult written = ::send(
+				client, response.data() + sent,
+				static_cast<int>(std::min(response.size() - sent, std::size_t{65536})), kFlags);
 			if (written <= 0) {
 				return; // the client hung up, e.g. after a size-limit abort
 			}
@@ -179,7 +236,7 @@ private:
 	}
 
 	Handler handler_;
-	int listener_{-1};
+	socket_detail::Socket listener_{socket_detail::kInvalidSocket};
 	std::uint16_t port_{0};
 	std::atomic<bool> stop_{false};
 	mutable std::mutex mutex_;

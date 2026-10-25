@@ -7,6 +7,7 @@
 #include <chrono>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <limits>
 #include <string>
 
 namespace {
@@ -44,6 +45,28 @@ TEST(Retry, ZeroMaxAttemptsStillPerformsTheRequestOnce) {
 	EXPECT_EQ(calls, 1);
 	ASSERT_TRUE(result);
 	EXPECT_EQ(result->status_code, 200);
+}
+
+TEST(Retry, RateLimitAndServerPoliciesAreIndependent) {
+	RetryPolicy policy;
+	policy.retry_on_rate_limit = false;
+	EXPECT_FALSE(should_retry(HttpResponse{429, "", {}}, policy));
+	EXPECT_FALSE(should_retry(HttpResponse{503, "", {}}, policy));
+	EXPECT_TRUE(should_retry(HttpResponse{500, "", {}}, policy));
+	EXPECT_TRUE(should_retry(HttpResponse{599, "", {}}, policy));
+	EXPECT_FALSE(should_retry(HttpResponse{600, "", {}}, policy));
+	policy.retry_on_rate_limit = true;
+	policy.retry_on_server_error = false;
+	EXPECT_TRUE(should_retry(HttpResponse{503, "", {}}, policy));
+	EXPECT_FALSE(should_retry(HttpResponse{500, "", {}}, policy));
+}
+
+TEST(Retry, RetryAfterRejectsPartialNumbers) {
+	for (const std::string_view value : {"30seconds", "30.5", "1e2", "30 5", "+30", "-1"}) {
+		EXPECT_EQ(retry_after(HttpResponse{429, "", {{"Retry-After", std::string{value}}}}),
+				  std::chrono::milliseconds{0})
+			<< value;
+	}
 }
 
 TEST(Retry, MaxAttemptsAtTheTopOfTheRangeTerminates) {
@@ -125,3 +148,19 @@ TEST(Retry, IgnoresAnUnparseableRetryAfterAndFallsBackToTheBackoff) {
 }
 
 } // namespace
+
+TEST(Retry, InvalidAndExtremePoliciesRemainBounded) {
+	spc::RetryPolicy policy;
+	policy.jitter_factor = 0.0;
+	policy.max_delay = std::chrono::milliseconds{-1};
+	EXPECT_EQ(spc::calculate_retry_delay(2, policy), std::chrono::milliseconds::zero());
+	policy.max_delay = std::chrono::milliseconds::max();
+	policy.initial_delay = policy.max_delay;
+	EXPECT_EQ(spc::calculate_retry_delay(1, policy), policy.max_delay);
+	policy.initial_delay = std::chrono::milliseconds{10};
+	policy.backoff_multiplier = std::numeric_limits<double>::quiet_NaN();
+	policy.jitter_factor = std::numeric_limits<double>::infinity();
+	EXPECT_EQ(spc::calculate_retry_delay(2, policy), std::chrono::milliseconds{10});
+	policy.backoff_multiplier = std::numeric_limits<double>::max();
+	EXPECT_EQ(spc::calculate_retry_delay(255, policy), policy.max_delay);
+}

@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "stormscope": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/thornjad/stormscope@ad398a6fb3699910d3b5fb891b0f1c96cdc5b040",
+        "stormscope"
+      ],
+      "env": {
+        "DISABLE_AUTO_GEOLOCATION": "true",
+        "ENABLE_CORELOCATION": "false"
+      }
+    }
+  }
+}
