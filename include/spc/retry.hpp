@@ -59,7 +59,7 @@ struct RetryPolicy {
 	const double multiplier =
 		std::isfinite(policy.backoff_multiplier) ? std::max(policy.backoff_multiplier, 0.0) : 1.0;
 	for (std::uint8_t i = 1; i < attempt; ++i) {
-		delay_ms *= multiplier;
+		delay_ms = std::min(delay_ms * multiplier, max_ms);
 	}
 	const double spread =
 		std::isfinite(policy.jitter_factor) ? std::clamp(policy.jitter_factor, 0.0, 1.0) : 0.0;

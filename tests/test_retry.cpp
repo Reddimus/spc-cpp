@@ -163,4 +163,19 @@ TEST(Retry, InvalidAndExtremePoliciesRemainBounded) {
 	EXPECT_EQ(spc::calculate_retry_delay(255, policy), policy.max_delay);
 }
 
+TEST(Retry, CappedBackoffStillHasJitter) {
+	spc::RetryPolicy policy;
+	policy.initial_delay = std::chrono::milliseconds{200};
+	policy.max_delay = std::chrono::milliseconds{1000};
+	policy.jitter_factor = 0.25;
+	bool saw_shorter = false;
+	for (int sample = 0; sample < 100; ++sample) {
+		const std::chrono::milliseconds delay = spc::calculate_retry_delay(10, policy);
+		EXPECT_GE(delay.count(), 750);
+		EXPECT_LE(delay, policy.max_delay);
+		saw_shorter = saw_shorter || delay < policy.max_delay;
+	}
+	EXPECT_TRUE(saw_shorter);
+}
+
 } // namespace
