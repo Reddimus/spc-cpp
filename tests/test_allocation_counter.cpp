@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <memory_resource>
 #include <new>
 #include <stdexcept>
 #include <vector>
@@ -111,18 +112,18 @@ TEST(AllocationCounter, CountsEveryOperatorNewAndDeleteForm) {
 	EXPECT_TRUE(aligned_ok);
 }
 
-TEST(AllocationCounter, SeesAllocationsMadeInsideTheStandardLibrary) {
-	// std::runtime_error copies its message inside libc++ and libstdc++, so
-	// this checks that the replacement reaches allocations made there.
-	// std::string growth would not show that: GCC inlines it from C++20 on.
-	constexpr char kMessage[] = "a message longer than any short-string buffer";
+TEST(AllocationCounter, SeesStandardLibraryNewDeleteResourceAllocations) {
+	// This resource must use replaceable operator new; exception storage may use malloc.
+	std::pmr::memory_resource* resource = std::pmr::new_delete_resource();
+	constexpr std::size_t kBytes = 100;
 	const AllocationProbe probe;
-	const std::runtime_error error{kMessage};
-	escaped = error.what();
+	void* block = resource->allocate(kBytes);
+	escaped = block;
 	const AllocationStats stats = probe.stats();
+	resource->deallocate(block, kBytes);
 
 	EXPECT_GE(stats.allocations, 1u);
-	EXPECT_GE(stats.bytes, sizeof(kMessage));
+	EXPECT_GE(stats.bytes, kBytes);
 }
 
 TEST(AllocationCounter, StartsEachProbeFromZero) {
