@@ -1,6 +1,10 @@
 # Glaze needs 3.31.
 cmake_minimum_required(VERSION 3.31)
 
+# Reconfigure incremental builds when the header changes the project version.
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+    ${CMAKE_CURRENT_SOURCE_DIR}/include/spc/version.hpp)
+
 # include/spc/version.hpp holds the version, so builds without CMake get it too.
 file(STRINGS ${CMAKE_CURRENT_SOURCE_DIR}/include/spc/version.hpp spc_version_lines
     REGEX "^#define SPC_VERSION_(MAJOR|MINOR|PATCH) [0-9]+$")

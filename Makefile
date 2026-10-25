@@ -35,6 +35,7 @@ lint:
 	@command -v clang-format >/dev/null || { echo "clang-format is not installed"; exit 1; }
 	@$(SOURCES) | xargs -0 clang-format --dry-run --Werror
 	@python3 tools/cpp_auto_audit.py
+	@python3 tools/test_install_hooks.py
 
 lint-md:
 	npx markdownlint-cli2 "**/*.md"
@@ -74,11 +75,14 @@ pre-commit: format lint
 
 install-hooks:
 	@hook="$$(git rev-parse --git-path hooks)/pre-commit"; \
-	if [ -f "$$hook" ] && ! grep -q 'make pre-commit' "$$hook"; then \
-		echo "$$hook already exists; not replacing it"; exit 1; \
-	fi; \
-	mkdir -p "$$(dirname "$$hook")" && printf '#!/bin/sh\nexec make pre-commit\n' > "$$hook" && \
-	chmod +x "$$hook" && echo "Installed $$hook (runs make pre-commit)"
+	if [ -f "$$hook" ]; then \
+        case "$$(cat "$$hook")" in \
+            "$$(printf '#!/bin/sh\nexec make lint')"|"$$(printf '#!/bin/sh\nexec make pre-commit')") ;; \
+            *) echo "$$hook already exists; not replacing it"; exit 1 ;; \
+        esac; \
+    fi; \
+	mkdir -p "$$(dirname "$$hook")" && printf '#!/bin/sh\nexec make lint\n' > "$$hook" && \
+	chmod +x "$$hook" && echo "Installed $$hook (runs make lint)"
 
 # Run an example: make run-static_feed, run-arcgis, run-fire_weather,
 # run-archive, run-watches, or run-parse_outlook.
@@ -101,6 +105,6 @@ help:
 	@echo "make format          Format C++ in place"
 	@echo "make format-md       Fix Markdown lint findings in place"
 	@echo "make coverage        HTML coverage report (needs lcov)"
-	@echo "make install-hooks   Run format and lint before each commit"
+	@echo "make install-hooks   Check format and lint before each commit"
 	@echo "make run-<example>   Run an example, e.g. make run-arcgis"
 	@echo "make clean           Remove build directories"

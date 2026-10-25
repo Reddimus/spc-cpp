@@ -93,6 +93,16 @@ TEST(Corpus, ParsesOnlyTheViewItIsGiven) {
 	EXPECT_THROW((void)parse_categorical(truncated, 1), std::runtime_error);
 }
 
+TEST(Corpus, RejectsTrailingDataAfterAJsonValue) {
+	for (const std::string_view suffix : {"garbage", "{}", " true", "\x01"}) {
+		const std::string body = std::string{R"({"features":[]})"} + std::string{suffix};
+		EXPECT_THROW((void)parse_categorical(body, 1), std::runtime_error) << body;
+	}
+	const std::string embedded_null = std::string{R"({"features":[]})"} + '\0' + "{}";
+	EXPECT_THROW((void)parse_categorical(embedded_null, 1), std::runtime_error);
+	EXPECT_NO_THROW((void)parse_categorical("{\"features\":[]} \r\n\t", 1));
+}
+
 TEST(Corpus, EmptyFeatureCollectionIsEmptyNotError) {
 	const CategoricalOutlookPayload p =
 		parse_categorical(R"({"type":"FeatureCollection","features":[]})", 7);

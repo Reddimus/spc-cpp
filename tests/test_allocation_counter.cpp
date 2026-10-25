@@ -111,18 +111,22 @@ TEST(AllocationCounter, CountsEveryOperatorNewAndDeleteForm) {
 	EXPECT_TRUE(aligned_ok);
 }
 
-TEST(AllocationCounter, SeesAllocationsMadeInsideTheStandardLibrary) {
-	// std::runtime_error copies its message inside libc++ and libstdc++, so
-	// this checks that the replacement reaches allocations made there.
-	// std::string growth would not show that: GCC inlines it from C++20 on.
+TEST(AllocationCounter, StandardLibraryAllocationVisibilityMatchesTheRuntime) {
 	constexpr char kMessage[] = "a message longer than any short-string buffer";
 	const AllocationProbe probe;
 	const std::runtime_error error{kMessage};
 	escaped = error.what();
 	const AllocationStats stats = probe.stats();
 
+#if defined(_MSVC_STL_VERSION)
+	// MSVC exception storage uses CRT allocation instead of replaceable operator new.
+	EXPECT_EQ(stats.allocations, 0u);
+	EXPECT_EQ(stats.bytes, 0u);
+#else
+	// libc++ and libstdc++ allocate the message through operator new.
 	EXPECT_GE(stats.allocations, 1u);
 	EXPECT_GE(stats.bytes, sizeof(kMessage));
+#endif
 }
 
 TEST(AllocationCounter, StartsEachProbeFromZero) {

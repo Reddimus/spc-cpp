@@ -10,6 +10,14 @@
 
 namespace spc::detail {
 
+namespace {
+
+struct JsonReadOptions : glz::opts {
+	bool validate_trailing_whitespace{true};
+};
+
+} // namespace
+
 const Json* lookup(const Json& obj, const char* key) {
 	if (!obj.is_object()) {
 		return nullptr;
@@ -191,17 +199,31 @@ std::vector<Polygon> parse_esri_rings(const Json& geom) {
 glz::expected<Json, std::string> parse_root(std::string_view body) {
 	Json root{};
 	// A view can end mid-buffer, so don't let Glaze assume a terminator after it.
-	constexpr glz::opts options{.null_terminated = false};
+	constexpr JsonReadOptions options{{.null_terminated = false}};
 	const glz::error_ctx ec = glz::read<options>(root, body);
 	if (ec) {
-		return glz::unexpected(glz::format_error(ec, body));
+		std::string message = glz::format_error(ec, body);
+		// Embedded NULs must survive std::exception::what() and C-string logging.
+		if (message.find('\0') != std::string::npos) {
+			std::string printable;
+			printable.reserve(message.size());
+			for (const char byte : message) {
+				if (byte == '\0') {
+					printable += "\\0";
+				} else {
+					printable += byte;
+				}
+			}
+			message = std::move(printable);
+		}
+		return glz::unexpected(std::move(message));
 	}
 	return root;
 }
 
 glz::expected<Json, std::string> parse_owned_root(const std::string& body) {
 	Json root{};
-	constexpr glz::opts options{.null_terminated = true};
+	constexpr JsonReadOptions options{{.null_terminated = true}};
 	const glz::error_ctx ec = glz::read<options>(root, body);
 	if (!ec) {
 		return root;

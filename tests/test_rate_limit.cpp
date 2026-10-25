@@ -176,4 +176,19 @@ TEST(RateLimit, ConcurrentCallersNeverGetMoreTokensThanTheBucketHolds) {
 	EXPECT_EQ(limiter.available_tokens(), 0);
 }
 
+TEST(RateLimit, ExtremeDurationsDoNotOverflow) {
+	RateLimiter::Config config;
+	config.refill_interval = milliseconds::max();
+	config.initial_tokens = 0;
+	RateLimiter empty{config};
+	EXPECT_EQ(empty.available_tokens(), 0);
+	EXPECT_FALSE(empty.try_acquire());
+	EXPECT_FALSE(empty.acquire_for(milliseconds::zero()));
+	EXPECT_FALSE(empty.acquire_for(milliseconds{10}));
+	EXPECT_FALSE(empty.acquire_for(milliseconds::max()));
+	config.initial_tokens = 1;
+	RateLimiter ready{config};
+	EXPECT_TRUE(ready.acquire_for(milliseconds::max()));
+}
+
 } // namespace

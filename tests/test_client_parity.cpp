@@ -330,6 +330,8 @@ TEST(ClientParity, AMalformedBodyFailsWithTheParsersMessage) {
 		"1e",
 		"1e+",
 		"1E-",
+		R"({"features":[]}garbage)",
+		std::string{R"({"features":[]})"} + '\0' + "{}",
 		read_fixture("arcgis_day1_categorical.geojson").substr(0, 5000),
 	};
 
@@ -361,6 +363,15 @@ TEST(ClientParity, ATypedQueryRejectsATruncatedPageWithNoRecords) {
 		EXPECT_EQ(result.error().code, ErrorCode::ServerError) << body;
 		EXPECT_EQ(result.error().message, "ArcGIS reported a truncated page containing no records");
 	}
+}
+
+TEST(ClientParity, TrailingJsonWhitespaceIsAcceptedByEveryClient) {
+	const std::shared_ptr<FixedTransport> transport =
+		std::make_shared<FixedTransport>("{\"features\":[]} \r\n\t");
+	EXPECT_TRUE(ArcGISClient{transport}.query_categorical(1));
+	EXPECT_TRUE(ArcGISClient{transport}.query_layer(ArcGISService::Outlooks, 1, {}));
+	EXPECT_TRUE(StaticFeedClient{transport}.day_categorical(1));
+	EXPECT_TRUE(ArchiveClient{transport}.watches());
 }
 
 } // namespace

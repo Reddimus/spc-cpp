@@ -19,7 +19,7 @@ pipx ensurepath
 pipx install clang-format==18.1.8
 
 make test
-make install-hooks   # optional: format and lint before each commit
+make install-hooks   # optional: check formatting and lint before each commit
 ```
 
 `make help` lists every target.
@@ -121,10 +121,9 @@ build, and runs it. `BENCH_ARGS` passes flags through, for example
 
 Each benchmark also reports the heap use of one call: `allocs`,
 `alloc_bytes`, `peak_bytes`, and `retained_bytes`, the memory the result
-keeps. They repeat exactly from run to run, so compare them directly. On
-macOS, `instructions` per iteration moves by under 1% between runs, even on
-a busy machine, which makes it the steadiest measure of CPU work.
-Timings are noisy: to compare two builds, run each with repetitions and
+keeps. MSVC runtime DLL allocations are outside this counter.
+Compare heap counters with the same build and input. On macOS,
+`instructions` per iteration also helps compare CPU work. Timings vary: to compare two builds, run each with repetitions and
 random interleaving, then compare the results with Google Benchmark's
 `compare.py`, which needs numpy and scipy:
 
@@ -162,3 +161,16 @@ with an error.
 3. The release workflow checks that the tag matches `version.hpp`, runs
    the tests and consumer checks, then publishes the release with the
    changelog section as its notes.
+
+## Repository tools
+
+`.mcp.json` (Claude) and `.codex/config.toml` (Codex) configure
+[StormScope](https://github.com/thornjad/stormscope), a community weather MCP,
+pinned to commit `ad398a6fb3699910d3b5fb891b0f1c96cdc5b040`. Install
+[uv](https://docs.astral.sh/uv/) and start a new trusted client session.
+It fetches public SPC/NWS data without an API key. Automatic location detection
+is disabled; pass coordinates explicitly. Codex exposes only outlooks, alerts,
+forecasts, and conditions. This tool is independent of the C++ library build.
+
+`.greptile/config.json` requests Apex reviews when a PR opens, preserves its
+description, and disables automatic approval. Each Apex review costs 10 credits.

@@ -28,8 +28,13 @@ using test::LoopbackServer;
 class NoProxyEnvironment : public testing::Environment {
 public:
 	void SetUp() override {
+#ifdef _WIN32
+		(void)::_putenv_s("NO_PROXY", "127.0.0.1");
+		(void)::_putenv_s("no_proxy", "127.0.0.1");
+#else
 		(void)::setenv("NO_PROXY", "127.0.0.1", 1);
 		(void)::setenv("no_proxy", "127.0.0.1", 1);
+#endif
 	}
 };
 

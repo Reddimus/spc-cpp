@@ -31,6 +31,11 @@ public:
 		const char* previous = std::setlocale(category_, nullptr);
 		saved_ = previous != nullptr ? previous : "C";
 		applied_ = std::setlocale(category_, name) != nullptr;
+#ifdef _WIN32
+		if (!applied_ && std::string_view{name} == "de_DE.UTF-8") {
+			applied_ = std::setlocale(category_, "German_Germany.utf8") != nullptr;
+		}
+#endif
 	}
 	~ScopedLocale() { (void)std::setlocale(category_, saved_.c_str()); }
 	ScopedLocale(const ScopedLocale&) = delete;

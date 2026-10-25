@@ -1,0 +1,9 @@
+[mcp_servers.stormscope]
+command = "uvx"
+args = ["--from", "git+https://github.com/thornjad/stormscope@ad398a6fb3699910d3b5fb891b0f1c96cdc5b040", "stormscope"]
+startup_timeout_sec = 120
+enabled_tools = ["get_spc_outlook", "get_national_outlook", "get_alerts", "get_forecast", "get_conditions"]
+
+[mcp_servers.stormscope.env]
+DISABLE_AUTO_GEOLOCATION = "true"
+ENABLE_CORELOCATION = "false"

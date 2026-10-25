@@ -41,8 +41,10 @@ int main() {
 - libcurl 7.85 or newer with its headers: `libcurl4-openssl-dev` on Ubuntu,
   built into macOS.
 
-CI builds on Linux, and on macOS for Apple silicon and Intel. Windows is
-untested.
+CI builds on Linux, macOS for Apple silicon and Intel, and Windows with MSVC.
+On Windows, install libcurl through the included vcpkg manifest and configure
+with `-DCMAKE_TOOLCHAIN_FILE=<vcpkg>/scripts/buildsystems/vcpkg.cmake`. Build
+with `--config Release` and run tests with `ctest --test-dir build -C Release`.
 
 Save the example above as `main.cpp` and this as `CMakeLists.txt`:
 
@@ -52,7 +54,7 @@ project(myapp LANGUAGES CXX)
 include(FetchContent)
 FetchContent_Declare(spc_cpp
     GIT_REPOSITORY https://github.com/Reddimus/spc-cpp.git
-    GIT_TAG v0.4.4
+    GIT_TAG v0.4.5
 )
 FetchContent_MakeAvailable(spc_cpp)
 add_executable(myapp main.cpp)
