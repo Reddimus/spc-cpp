@@ -257,12 +257,13 @@ std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 		r.reserve(ring_arr.size());
 		for (const glz::generic& pt : ring_arr) {
 			if (!pt.is_array()) {
-				continue;
+				throw std::runtime_error("Invalid Esri coordinate point");
 			}
 			const glz::generic::array_t& pt_arr = pt.get_array();
-			if (pt_arr.size() >= 2 && pt_arr[0].is_number() && pt_arr[1].is_number()) {
-				r.push_back({pt_arr[0].get<double>(), pt_arr[1].get<double>()});
+			if (pt_arr.size() < 2 || !pt_arr[0].is_number() || !pt_arr[1].is_number()) {
+				throw std::runtime_error("Invalid Esri coordinate point");
 			}
+			r.push_back({pt_arr[0].get<double>(), pt_arr[1].get<double>()});
 		}
 		if (mercator) {
 			validate_mercator(r); // Validate holes too, before the winding filter.

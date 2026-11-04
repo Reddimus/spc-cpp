@@ -593,6 +593,33 @@ TEST(Models, InvalidProjectedHolesFailBeforeBeingDiscarded) {
 		std::runtime_error);
 }
 
+TEST(EsriRings, MalformedPointsFailBeforeTheWindingFilterForEverySupportedReference) {
+	for (const int wkid : {3857, 102100, 102113, 4326, 4269}) {
+		for (const bool hole : {false, true}) {
+			for (const char* point :
+				 {"null", "0", "[1]", "[\"bad\",1]", "[0,\"bad\"]", "[true,0]"}) {
+				const Json geometry = *detail::parse_root(std::format(
+					R"({{"spatialReference":{{"wkid":{}}},"rings":[[[0,0],{},[1,1],{},[0,0]]]}})",
+					wkid, point, hole ? "[0,1]" : "[1,0]"));
+				EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error)
+					<< "wkid=" << wkid << " hole=" << hole << " point=" << point;
+			}
+		}
+	}
+	const Json no_reference = *detail::parse_root(R"({"rings":[[[0,0],null,[1,1],[1,0],[0,0]]]})");
+	EXPECT_THROW((void)detail::parse_esri_rings(no_reference), std::runtime_error);
+}
+
+TEST(EsriRings, ExtraCoordinateDimensionsRemainSupported) {
+	const Json geometry = *detail::parse_root(
+		R"({"rings":[[[0,0,5,null],[0,1,6,null],[1,1,7,null],[1,0,8,null],[0,0,5,null]]]})");
+	const std::vector<Polygon> rings = detail::parse_esri_rings(geometry);
+	ASSERT_EQ(rings.size(), 1u);
+	ASSERT_EQ(rings[0].size(), 5u);
+	EXPECT_DOUBLE_EQ(rings[0][2].lon, 1.0);
+	EXPECT_DOUBLE_EQ(rings[0][2].lat, 1.0);
+}
+
 TEST(EsriRings, ProjectedEdgesPreserveMembershipIncludingImplicitClosingEdge) {
 	// In the source plane the triangle's diagonal is y = bottom + x * slope.
 	// Probe 20 projected metres to either side, using the independent sinh

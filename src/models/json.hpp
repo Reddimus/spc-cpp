@@ -64,6 +64,7 @@ std::vector<Polygon> parse_rings(const Json& geom);
 /// is converted to degrees with at most one metre of boundary error. A geometry
 /// needing over one million added points fails. A geometry reference overrides
 /// the response reference.
+/// Malformed points fail for every supported spatial reference.
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference = nullptr);
 
 /// Shoelace signed area; positive means counter-clockwise.
