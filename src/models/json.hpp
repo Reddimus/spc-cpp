@@ -86,8 +86,22 @@ Json parse_root_or_throw(std::string_view body);
 /// A feature's fields: GeoJSON `properties` or Esri `attributes`.
 const Json* feature_fields(const Json& feature);
 
-/// Rings from either geometry shape: Esri `rings` or GeoJSON `coordinates`.
-std::vector<Polygon> feature_rings(const Json& geometry, const Json* reference = nullptr);
+/// One per payload: shares the collection reference and projection budget
+/// across all features, accepting Esri rings or GeoJSON coordinates.
+class PayloadGeometryParser {
+public:
+	explicit PayloadGeometryParser(const Json& root);
+	~PayloadGeometryParser() = default;
+	PayloadGeometryParser(const PayloadGeometryParser&) = delete;
+	PayloadGeometryParser& operator=(const PayloadGeometryParser&) = delete;
+	PayloadGeometryParser(PayloadGeometryParser&&) = delete;
+	PayloadGeometryParser& operator=(PayloadGeometryParser&&) = delete;
+	std::vector<Polygon> parse(const Json& geometry);
+
+private:
+	const Json* reference_;
+	std::size_t remaining_added_points_;
+};
 
 /// The first non-empty string among `keys`, e.g. {"LABEL", "label"}.
 std::string first_string(const Json& obj, std::initializer_list<const char*> keys);

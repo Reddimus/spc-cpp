@@ -18,6 +18,7 @@ MesoscalePayload detail::mesoscale_from_tree(const Json& root) {
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
+	detail::PayloadGeometryParser geometry_parser(root);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
 		if (props == nullptr || !props->is_object()) {
@@ -34,7 +35,7 @@ MesoscalePayload detail::mesoscale_from_tree(const Json& root) {
 		md.url = detail::json_string(*props, "popupinfo");
 		const Json* geometry = detail::lookup(feat, "geometry");
 		if (geometry != nullptr) {
-			md.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
+			md.rings = geometry_parser.parse(*geometry);
 		}
 		payload.discussions.push_back(std::move(md));
 	}

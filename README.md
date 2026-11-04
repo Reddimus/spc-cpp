@@ -147,7 +147,7 @@ reference is assumed to use degrees. Request `outSR=4326` for other Esri systems
 Projected edges are subdivided to preserve their boundaries within one metre.
 Malformed Esri points and invalid projected coordinates, including discarded
 holes, raise a parse error.
-A geometry needing more than one million added points also raises a parse error.
+A payload needing more than one million added points also raises a parse error.
 
 ## Settings and threads
 

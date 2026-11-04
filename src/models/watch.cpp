@@ -32,6 +32,7 @@ WatchPayload detail::watches_from_tree(const Json& root) {
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
+	detail::PayloadGeometryParser geometry_parser(root);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::lookup(feat, "properties");
 		if (props == nullptr || !props->is_object()) {
@@ -51,7 +52,7 @@ WatchPayload detail::watches_from_tree(const Json& root) {
 		w.expires_at = detail::json_string(*props, "expire");
 		const Json* geometry = detail::lookup(feat, "geometry");
 		if (geometry != nullptr) {
-			w.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
+			w.rings = geometry_parser.parse(*geometry);
 		}
 		payload.watches.push_back(std::move(w));
 	}

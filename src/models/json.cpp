@@ -20,6 +20,7 @@ struct JsonReadOptions : glz::opts {
 
 constexpr double kMercatorRadius = 6378137.0;
 constexpr double kDegrees = 180.0 / std::numbers::pi;
+constexpr std::size_t kMaxAddedProjectionPoints = 1000000;
 
 void validate_mercator(const Polygon& ring) {
 	for (const LonLat point : ring) {
@@ -53,8 +54,7 @@ std::size_t mercator_inserted_points(const Polygon& ring, std::size_t remaining)
 	for (std::size_t i = 0; i < ring.size(); ++i) {
 		const std::size_t extra = mercator_edge_steps(ring[i], ring[(i + 1) % ring.size()]) - 1;
 		if (extra > remaining - inserted) {
-			throw std::runtime_error(
-				"Esri Web Mercator geometry exceeds projection expansion limit");
+			throw std::runtime_error("Esri Web Mercator payload exceeds the added-point limit");
 		}
 		inserted += extra;
 	}
@@ -222,7 +222,10 @@ double ring_signed_area(const Polygon& ring) {
 	return sum / 2.0;
 }
 
-std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
+namespace {
+
+std::vector<Polygon> parse_esri_rings_with_budget(const Json& geom, const Json* reference,
+												  std::size_t& remaining_added_points) {
 	std::vector<Polygon> out;
 	if (!geom.is_object()) {
 		return out;
@@ -276,7 +279,7 @@ std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 	}
 	if (mercator) {
 		// Preflight the entire geometry before allocating any expanded ring.
-		std::size_t remaining = 1000000;
+		std::size_t remaining = remaining_added_points;
 		std::vector<std::size_t> inserted;
 		inserted.reserve(out.size());
 		for (const Polygon& ring : out) {
@@ -287,8 +290,16 @@ std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 		for (std::size_t i = 0; i < out.size(); ++i) {
 			out[i] = project_mercator_ring(out[i], inserted[i]);
 		}
+		remaining_added_points = remaining;
 	}
 	return out;
+}
+
+} // namespace
+
+std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
+	std::size_t remaining = kMaxAddedProjectionPoints;
+	return parse_esri_rings_with_budget(geom, reference, remaining);
 }
 
 glz::expected<Json, std::string> parse_root(std::string_view body) {
@@ -341,9 +352,14 @@ const Json* feature_fields(const Json& feature) {
 	return properties != nullptr ? properties : lookup(feature, "attributes");
 }
 
-std::vector<Polygon> feature_rings(const Json& geometry, const Json* reference) {
-	return lookup(geometry, "rings") != nullptr ? parse_esri_rings(geometry, reference)
-												: parse_rings(geometry);
+PayloadGeometryParser::PayloadGeometryParser(const Json& root)
+	: reference_(lookup(root, "spatialReference")),
+	  remaining_added_points_(kMaxAddedProjectionPoints) {}
+
+std::vector<Polygon> PayloadGeometryParser::parse(const Json& geometry) {
+	return lookup(geometry, "rings") != nullptr
+			   ? parse_esri_rings_with_budget(geometry, reference_, remaining_added_points_)
+			   : parse_rings(geometry);
 }
 
 std::string first_string(const Json& obj, std::initializer_list<const char*> keys) {

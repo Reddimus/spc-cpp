@@ -21,6 +21,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <future>
 #include <gtest/gtest.h>
 #include <limits>
 #include <numbers>
@@ -689,6 +690,51 @@ TEST(EsriRings, ProjectedExpansionBudgetAppliesAcrossAllRings) {
 	const Json geometry = *detail::parse_root(
 		std::format(R"({{"spatialReference":{{"wkid":3857}},"rings":[{}]}})", rings));
 	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+}
+
+std::string projected_feature_payload(std::size_t count) {
+	std::string features;
+	for (std::size_t i = 0; i < count; ++i) {
+		if (i != 0) {
+			features += ',';
+		}
+		features +=
+			R"({"properties":{"dn":15,"LABEL":"15","name":"Risk","number":1},"geometry":{"rings":[[[-19000000,-19000000],[-19000000,19000000],[19000000,19000000],[-19000000,-19000000]]]}})";
+	}
+	return std::format(R"({{"spatialReference":{{"wkid":3857}},"features":[{}]}})", features);
+}
+
+TEST(Models, ProjectionExpansionBudgetSpansEveryFeatureInThePayload) {
+	const std::string body = projected_feature_payload(300);
+	EXPECT_THROW((void)parse_fire_weather(body, 1, FireWeatherLayer::Outlook), std::runtime_error);
+	EXPECT_THROW((void)parse_day4_8(body, 4), std::runtime_error);
+	EXPECT_THROW((void)parse_conditional_intensity(body, 1, "tornado"), std::runtime_error);
+	EXPECT_THROW((void)parse_mesoscale_discussions(body), std::runtime_error);
+	EXPECT_THROW((void)parse_watches(body), std::runtime_error);
+}
+
+TEST(Models, ProjectionBudgetsAreIndependentForSequentialAndConcurrentPayloads) {
+	const std::string body = projected_feature_payload(200);
+	auto parse_count = [&body] {
+		return parse_fire_weather(body, 1, FireWeatherLayer::Outlook).features.size();
+	};
+	std::future<std::size_t> first = std::async(std::launch::async, parse_count);
+	std::future<std::size_t> second = std::async(std::launch::async, parse_count);
+	EXPECT_EQ(first.get(), 200u);
+	EXPECT_EQ(second.get(), 200u);
+	EXPECT_EQ(parse_count(), 200u);
+	EXPECT_EQ(parse_count(), 200u);
+}
+
+TEST(Models, GeometryReferenceOverridesDoNotLeakBetweenFeatures) {
+	const FireWeatherPayload payload = parse_fire_weather(
+		R"({"spatialReference":{"wkid":3857},"features":[{"properties":{"dn":5},"geometry":{"spatialReference":{"wkid":4326},"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}},{"properties":{"dn":5},"geometry":{"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}}]})",
+		1, FireWeatherLayer::Outlook);
+	ASSERT_EQ(payload.features.size(), 2u);
+	ASSERT_EQ(payload.features[0].rings.size(), 1u);
+	ASSERT_EQ(payload.features[1].rings.size(), 1u);
+	EXPECT_DOUBLE_EQ(payload.features[0].rings[0][2].lat, 1.0);
+	EXPECT_NEAR(payload.features[1].rings[0][2].lat, 0.000008983152841195177, 1e-12);
 }
 
 TEST(ArcGISParity, CapturedMercatorFireWeatherKeepsProjectedPlaneMembership) {

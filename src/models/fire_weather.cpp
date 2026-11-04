@@ -81,6 +81,7 @@ FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
+	detail::PayloadGeometryParser geometry_parser(root);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
 		const Json* geometry = detail::lookup(feat, "geometry");
@@ -104,7 +105,7 @@ FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
 		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});
 		f.valid_until = detail::first_timestamp(*props, {"EXPIRE", "expire"});
-		f.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
+		f.rings = geometry_parser.parse(*geometry);
 		if (!f.rings.empty() && (day <= 2 || f.probability > 0.0)) {
 			payload.features.push_back(std::move(f));
 		}
