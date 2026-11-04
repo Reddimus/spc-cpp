@@ -45,7 +45,7 @@ struct FireWeatherPayload {
 /// `layer` is required because days 1 and 2 carry only a numeric `dn` band,
 /// and the outlook (5 ELEV, 8 CRIT, 10 EXTM) and dry-thunderstorm (5 IDRT,
 /// 8 SDRT) layers reuse the same numbers. Days 3-8 report probabilities.
-/// @throws std::runtime_error if `body` is not valid JSON.
+/// @throws std::runtime_error for invalid JSON or unsupported Esri spatial references.
 [[nodiscard]] FireWeatherPayload parse_fire_weather(std::string_view body, std::int32_t day,
 													FireWeatherLayer layer);
 

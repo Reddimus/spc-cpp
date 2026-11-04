@@ -46,7 +46,7 @@ Day48OutlookPayload detail::day4_8_from_tree(const Json& root, std::int32_t day)
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
 		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});
 		f.valid_until = detail::first_timestamp(*props, {"EXPIRE", "expire"});
-		f.rings = detail::feature_rings(*geometry);
+		f.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
 		if (f.probability > 0.0 && !f.rings.empty()) {
 			payload.features.push_back(std::move(f));
 		}
@@ -79,7 +79,7 @@ detail::conditional_intensity_from_tree(const Json& root, std::int32_t day, std:
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
 		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});
 		f.valid_until = detail::first_timestamp(*props, {"EXPIRE", "expire"});
-		f.rings = detail::feature_rings(*geometry);
+		f.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
 		if (!f.rings.empty()) {
 			payload.features.push_back(std::move(f));
 		}

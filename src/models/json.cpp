@@ -4,6 +4,7 @@
 #include <format>
 #include <glaze/util/fast_float.hpp>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <system_error>
 #include <utility>
@@ -160,7 +161,7 @@ double ring_signed_area(const Polygon& ring) {
 	return sum / 2.0;
 }
 
-std::vector<Polygon> parse_esri_rings(const Json& geom) {
+std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 	std::vector<Polygon> out;
 	if (!geom.is_object()) {
 		return out;
@@ -168,6 +169,21 @@ std::vector<Polygon> parse_esri_rings(const Json& geom) {
 	const Json* rings_node = lookup(geom, "rings");
 	if (rings_node == nullptr || !rings_node->is_array()) {
 		return out;
+	}
+	if (const Json* local = lookup(geom, "spatialReference")) {
+		reference = local;
+	}
+	bool mercator = false;
+	if (reference != nullptr) {
+		const Json* id = lookup(*reference, "latestWkid");
+		if (id == nullptr) {
+			id = lookup(*reference, "wkid");
+		}
+		const double wkid = id != nullptr && id->is_number() ? id->get<double>() : 0.0;
+		mercator = wkid == 3857 || wkid == 102100 || wkid == 102113;
+		if (!mercator && wkid != 4326 && wkid != 4269) {
+			throw std::runtime_error("Unsupported Esri spatial reference; request outSR=4326");
+		}
 	}
 	const glz::generic::array_t& rings = rings_node->get_array();
 	out.reserve(rings.size());
@@ -190,6 +206,21 @@ std::vector<Polygon> parse_esri_rings(const Json& geom) {
 		// Counter-clockwise (positive area in lon/lat) is an Esri hole.
 		if (r.empty() || ring_signed_area(r) > 0.0) {
 			continue;
+		}
+		if (mercator) {
+			constexpr double kRadius = 6378137.0;
+			constexpr double kDegrees = 180.0 / std::numbers::pi;
+			for (LonLat& point : r) {
+				if (!std::isfinite(point.lon) || !std::isfinite(point.lat) ||
+					std::abs(point.lon) > kRadius * std::numbers::pi) {
+					throw std::runtime_error("Invalid Esri Web Mercator coordinates");
+				}
+				point.lon = (point.lon / kRadius) * kDegrees;
+				// exp's argument stays nonpositive, including near the poles.
+				point.lat = std::copysign(
+					90.0 - 2.0 * kDegrees * std::atan(std::exp(-std::abs(point.lat) / kRadius)),
+					point.lat);
+			}
 		}
 		out.push_back(std::move(r));
 	}
@@ -246,8 +277,8 @@ const Json* feature_fields(const Json& feature) {
 	return properties != nullptr ? properties : lookup(feature, "attributes");
 }
 
-std::vector<Polygon> feature_rings(const Json& geometry) {
-	return lookup(geometry, "rings") != nullptr ? parse_esri_rings(geometry)
+std::vector<Polygon> feature_rings(const Json& geometry, const Json* reference) {
+	return lookup(geometry, "rings") != nullptr ? parse_esri_rings(geometry, reference)
 												: parse_rings(geometry);
 }
 

@@ -49,11 +49,11 @@ struct ConditionalIntensityPayload {
 
 /// Parse a Day 4-8 outlook from the static GeoJSON feed or an ArcGIS Esri
 /// response. Areas with no probability or no rings are skipped.
-/// @throws std::runtime_error if `body` is not valid JSON.
+/// @throws std::runtime_error for invalid JSON or unsupported Esri spatial references.
 [[nodiscard]] Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day);
 
 /// Parse a conditional-intensity layer (GeoJSON or Esri).
-/// @throws std::runtime_error if `body` is not valid JSON.
+/// @throws std::runtime_error for invalid JSON or unsupported Esri spatial references.
 [[nodiscard]] ConditionalIntensityPayload
 parse_conditional_intensity(std::string_view body, std::int32_t day, std::string hazard);
 

@@ -60,8 +60,9 @@ std::vector<Polygon> parse_rings(const Json& geom);
 
 /// Outer rings of an Esri `{"rings": [...]}` geometry. Esri mixes outer
 /// rings (clockwise) and holes (counter-clockwise) in one list; the holes are
-/// dropped so the result matches `parse_rings` for the same layer.
-std::vector<Polygon> parse_esri_rings(const Json& geom);
+/// dropped so the result matches `parse_rings` for the same layer. Web Mercator
+/// is converted to degrees; a geometry reference overrides the response reference.
+std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference = nullptr);
 
 /// Shoelace signed area; positive means counter-clockwise in lon/lat.
 double ring_signed_area(const Polygon& ring);
@@ -83,7 +84,7 @@ Json parse_root_or_throw(std::string_view body);
 const Json* feature_fields(const Json& feature);
 
 /// Rings from either geometry shape: Esri `rings` or GeoJSON `coordinates`.
-std::vector<Polygon> feature_rings(const Json& geometry);
+std::vector<Polygon> feature_rings(const Json& geometry, const Json* reference = nullptr);
 
 /// The first non-empty string among `keys`, e.g. {"LABEL", "label"}.
 std::string first_string(const Json& obj, std::initializer_list<const char*> keys);

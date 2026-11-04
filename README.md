@@ -135,12 +135,15 @@ problems. `Error::code` says what went wrong:
 | `ServerError` | HTTP 5xx other than 503, after retries, or an ArcGIS query that never finished paging. |
 | `InvalidRequest` | An unsupported day or hazard, HTTP 400, an ArcGIS error such as a bad layer ID, or a response over 64 MiB. |
 | `NotFound` | A URL or ArcGIS service that no longer exists. Report it as a bug. |
-| `ParseError` | The body was not valid JSON. |
+| `ParseError` | Malformed JSON or an unsupported Esri spatial reference. |
 | `FeedUnavailable` | Only `StaticFeedClient` returns it. SPC has not issued the product, as with day 1 probabilities overnight. Treat it as no data. `ArcGISClient` returns an empty result instead. |
 | `Unknown` | Any other HTTP status, such as 422 for a malformed `ArchiveClient` timestamp. `Error::http_status` holds it. |
 
 The offline `parse_*` functions, such as `spc::parse_categorical(body, day)`,
-throw `std::runtime_error` on malformed JSON.
+throw `std::runtime_error` on malformed JSON or unsupported Esri spatial references.
+Coordinates are longitude/latitude in degrees. Esri Web Mercator (3857, 102100,
+or 102113) is converted; 4326 and 4269 are preserved. Data without a spatial
+reference is assumed to use degrees. Request `outSR=4326` for other Esri systems.
 
 ## Settings and threads
 

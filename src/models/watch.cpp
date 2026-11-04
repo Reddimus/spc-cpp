@@ -51,7 +51,7 @@ WatchPayload detail::watches_from_tree(const Json& root) {
 		w.expires_at = detail::json_string(*props, "expire");
 		const Json* geometry = detail::lookup(feat, "geometry");
 		if (geometry != nullptr) {
-			w.rings = detail::feature_rings(*geometry);
+			w.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
 		}
 		payload.watches.push_back(std::move(w));
 	}

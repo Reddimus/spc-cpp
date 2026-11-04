@@ -34,7 +34,7 @@ MesoscalePayload detail::mesoscale_from_tree(const Json& root) {
 		md.url = detail::json_string(*props, "popupinfo");
 		const Json* geometry = detail::lookup(feat, "geometry");
 		if (geometry != nullptr) {
-			md.rings = detail::feature_rings(*geometry);
+			md.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
 		}
 		payload.discussions.push_back(std::move(md));
 	}
