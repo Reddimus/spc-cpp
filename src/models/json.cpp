@@ -1,5 +1,6 @@
 #include "models/json.hpp"
 
+#include <algorithm>
 #include <cmath>
 #include <format>
 #include <glaze/util/fast_float.hpp>
@@ -16,6 +17,62 @@ namespace {
 struct JsonReadOptions : glz::opts {
 	bool validate_trailing_whitespace{true};
 };
+
+constexpr double kMercatorRadius = 6378137.0;
+constexpr double kDegrees = 180.0 / std::numbers::pi;
+
+void validate_mercator(const Polygon& ring) {
+	for (const LonLat point : ring) {
+		if (!std::isfinite(point.lon) || !std::isfinite(point.lat) ||
+			std::abs(point.lon) > kMercatorRadius * std::numbers::pi ||
+			std::abs(point.lat) > kMercatorRadius * std::numbers::pi) {
+			throw std::runtime_error("Invalid Esri Web Mercator coordinates");
+		}
+	}
+}
+
+LonLat inverse_mercator(LonLat point) {
+	return {(point.lon / kMercatorRadius) * kDegrees,
+			std::copysign(90.0 - 2.0 * kDegrees *
+									 std::atan(std::exp(-std::abs(point.lat) / kMercatorRadius)),
+						  point.lat)};
+}
+
+std::size_t mercator_edge_steps(LonLat a, LonLat b) {
+	if (a.lon == b.lon || a.lat == b.lat) {
+		return 1; // Axis-aligned edges stay straight after projection.
+	}
+	// Inverse latitude has |second derivative| <= 1/(2 R^2). A 10 km
+	// vertical step bounds linear interpolation error to < 1 metre on R.
+	return std::max(std::size_t{1},
+					static_cast<std::size_t>(std::ceil(std::abs(b.lat - a.lat) / 10000.0)));
+}
+
+Polygon project_mercator_ring(const Polygon& ring) {
+	constexpr std::size_t kMaxInserted = 1000000;
+	std::size_t inserted = 0;
+	for (std::size_t i = 0; i < ring.size(); ++i) {
+		const std::size_t extra = mercator_edge_steps(ring[i], ring[(i + 1) % ring.size()]) - 1;
+		if (extra > kMaxInserted - inserted) {
+			throw std::runtime_error("Esri Web Mercator ring exceeds projection expansion limit");
+		}
+		inserted += extra;
+	}
+	Polygon projected;
+	projected.reserve(ring.size() + inserted);
+	for (std::size_t i = 0; i < ring.size(); ++i) {
+		const LonLat a = ring[i];
+		const LonLat b = ring[(i + 1) % ring.size()];
+		projected.push_back(inverse_mercator(a));
+		const std::size_t steps = mercator_edge_steps(a, b);
+		for (std::size_t j = 1; j < steps; ++j) {
+			const double t = static_cast<double>(j) / static_cast<double>(steps);
+			projected.push_back(
+				inverse_mercator({std::lerp(a.lon, b.lon, t), std::lerp(a.lat, b.lat, t)}));
+		}
+	}
+	return projected;
+}
 
 } // namespace
 
@@ -203,25 +260,15 @@ std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 				r.push_back({pt_arr[0].get<double>(), pt_arr[1].get<double>()});
 			}
 		}
-		// Counter-clockwise (positive area in lon/lat) is an Esri hole.
+		if (mercator) {
+			validate_mercator(r); // Validate holes too, before the winding filter.
+		}
+		// Counter-clockwise (positive area in source coordinates) is an Esri hole.
 		if (r.empty() || ring_signed_area(r) > 0.0) {
 			continue;
 		}
 		if (mercator) {
-			constexpr double kRadius = 6378137.0;
-			constexpr double kDegrees = 180.0 / std::numbers::pi;
-			for (LonLat& point : r) {
-				if (!std::isfinite(point.lon) || !std::isfinite(point.lat) ||
-					std::abs(point.lon) > kRadius * std::numbers::pi ||
-					std::abs(point.lat) > kRadius * std::numbers::pi) {
-					throw std::runtime_error("Invalid Esri Web Mercator coordinates");
-				}
-				point.lon = (point.lon / kRadius) * kDegrees;
-				// exp's argument stays nonpositive, including near the poles.
-				point.lat = std::copysign(
-					90.0 - 2.0 * kDegrees * std::atan(std::exp(-std::abs(point.lat) / kRadius)),
-					point.lat);
-			}
+			r = project_mercator_ring(r);
 		}
 		out.push_back(std::move(r));
 	}

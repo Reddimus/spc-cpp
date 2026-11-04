@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.7] - 2026-11-04
+
+### Fixed
+
+- Preserve Web Mercator polygon boundaries within one metre when converting to longitude/latitude.
+- Reject invalid projected coordinates in discarded holes and bound projection expansion.
+
 ## [0.4.6] - 2026-11-03
 
 ### Fixed
