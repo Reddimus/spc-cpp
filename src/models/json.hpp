@@ -61,7 +61,7 @@ std::vector<Polygon> parse_rings(const Json& geom);
 /// Outer rings of an Esri `{"rings": [...]}` geometry. Esri mixes outer
 /// rings (clockwise) and holes (counter-clockwise) in one list; the holes are
 /// dropped so the result matches `parse_rings` for the same layer. Web Mercator
-/// is converted to degrees with at most one metre of boundary error. A ring
+/// is converted to degrees with at most one metre of boundary error. A geometry
 /// needing over one million added points fails. A geometry reference overrides
 /// the response reference.
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference = nullptr);

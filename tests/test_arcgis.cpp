@@ -650,6 +650,20 @@ TEST(EsriRings, ProjectedExpansionBudgetFailsInsteadOfReturningInaccurateEdges) 
 	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
 }
 
+TEST(EsriRings, ProjectedExpansionBudgetAppliesAcrossAllRings) {
+	std::string rings;
+	for (int i = 0; i < 300; ++i) {
+		if (i != 0) {
+			rings += ',';
+		}
+		rings += "[[-19000000,-19000000],[-19000000,19000000],[19000000,19000000],[-19000000,-"
+				 "19000000]]";
+	}
+	const Json geometry = *detail::parse_root(
+		std::format(R"({{"spatialReference":{{"wkid":3857}},"rings":[{}]}})", rings));
+	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+}
+
 TEST(ArcGISParity, CapturedMercatorFireWeatherKeepsProjectedPlaneMembership) {
 	constexpr double kRadius = 6378137.0;
 	constexpr double kDegrees = 180.0 / std::numbers::pi;

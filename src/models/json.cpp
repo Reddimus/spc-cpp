@@ -48,16 +48,20 @@ std::size_t mercator_edge_steps(LonLat a, LonLat b) {
 					static_cast<std::size_t>(std::ceil(std::abs(b.lat - a.lat) / 10000.0)));
 }
 
-Polygon project_mercator_ring(const Polygon& ring) {
-	constexpr std::size_t kMaxInserted = 1000000;
+std::size_t mercator_inserted_points(const Polygon& ring, std::size_t remaining) {
 	std::size_t inserted = 0;
 	for (std::size_t i = 0; i < ring.size(); ++i) {
 		const std::size_t extra = mercator_edge_steps(ring[i], ring[(i + 1) % ring.size()]) - 1;
-		if (extra > kMaxInserted - inserted) {
-			throw std::runtime_error("Esri Web Mercator ring exceeds projection expansion limit");
+		if (extra > remaining - inserted) {
+			throw std::runtime_error(
+				"Esri Web Mercator geometry exceeds projection expansion limit");
 		}
 		inserted += extra;
 	}
+	return inserted;
+}
+
+Polygon project_mercator_ring(const Polygon& ring, std::size_t inserted) {
 	Polygon projected;
 	projected.reserve(ring.size() + inserted);
 	for (std::size_t i = 0; i < ring.size(); ++i) {
@@ -267,10 +271,21 @@ std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 		if (r.empty() || ring_signed_area(r) > 0.0) {
 			continue;
 		}
-		if (mercator) {
-			r = project_mercator_ring(r);
-		}
 		out.push_back(std::move(r));
+	}
+	if (mercator) {
+		// Preflight the entire geometry before allocating any expanded ring.
+		std::size_t remaining = 1000000;
+		std::vector<std::size_t> inserted;
+		inserted.reserve(out.size());
+		for (const Polygon& ring : out) {
+			const std::size_t count = mercator_inserted_points(ring, remaining);
+			remaining -= count;
+			inserted.push_back(count);
+		}
+		for (std::size_t i = 0; i < out.size(); ++i) {
+			out[i] = project_mercator_ring(out[i], inserted[i]);
+		}
 	}
 	return out;
 }
