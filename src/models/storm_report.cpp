@@ -23,11 +23,14 @@ StormReportPayload detail::storm_reports_from_tree(const Json& root) {
 	const Json::array_t& features = features_node->get_array();
 	// Count first so a body padded with values that aren't features can't make
 	// the list reserve room for reports it never gets.
-	payload.reports.reserve(static_cast<std::size_t>(std::ranges::count_if(
-		features, [](const Json& feat) { return detail::lookup(feat, "properties") != nullptr; })));
+	payload.reports.reserve(
+		static_cast<std::size_t>(std::ranges::count_if(features, [](const Json& feat) {
+			const Json* props = detail::lookup(feat, "properties");
+			return props != nullptr && props->is_object();
+		})));
 	for (const Json& feat : features) {
 		const Json* props = detail::lookup(feat, "properties");
-		if (props == nullptr) {
+		if (props == nullptr || !props->is_object()) {
 			continue;
 		}
 		StormReport sr;

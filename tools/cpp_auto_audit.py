@@ -22,7 +22,7 @@ DEFAULT_ALLOWLIST = "tools/cpp_auto_allowlist.txt"
 WORD_AUTO = re.compile(r"\bauto\b")
 STRUCTURED_BINDING = re.compile(r"\bauto(?:\s*[\*&])?\s*\[")
 DECLARATION_AUTO = re.compile(
-    r"^\s*(?:for\s*\(\s*)?(?:const\s+|constexpr\s+|static\s+|volatile\s+|mutable\s+)*"
+    r"^\s*(?:(?:for|if|switch)\s*\(\s*)?(?:const\s+|constexpr\s+|static\s+|volatile\s+|mutable\s+)*"
     r"auto(?:\s*[\*&])?\s*(?:\w+|\[)"
 )
 
@@ -68,28 +68,25 @@ class Violation:
 
 
 def tracked_cpp_files(repo_root: Path) -> list[Path]:
-    # Include untracked files so a new file fails locally, not first in CI.
+    # Include untracked, non-ignored files so a new test file is audited
+    # locally before CI sees it.
     proc = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+        ["git", "ls-files", "-z", "--cached", "--others", "--exclude-standard"],
         cwd=repo_root,
         check=True,
         capture_output=True,
         text=True,
     )
-    seen: set[Path] = set()
     files: list[Path] = []
-    for raw in proc.stdout.splitlines():
-        path = repo_root / raw
-        if path in seen:
+    for raw in sorted(set(proc.stdout.split("\0")) - {""}):
+        relative = Path(raw)
+        if relative.suffix not in CPP_SUFFIXES:
             continue
-        seen.add(path)
-        if path.suffix not in CPP_SUFFIXES:
+        if any(part == "build" or part.startswith("build-") or part == "_deps" for part in relative.parts[:-1]):
             continue
-        if any(part.startswith("build") for part in path.parts):
+        if not (repo_root / relative).exists():  # deleted but not yet staged
             continue
-        if "_deps" in path.parts:
-            continue
-        files.append(path)
+        files.append(repo_root / relative)
     return files
 
 
@@ -109,12 +106,20 @@ def read_allowlist(path: Path) -> list[AllowRule]:
 
 
 def is_lambda_closure(line: str) -> bool:
-    if "=" not in line:
+    initializer = line.partition("=")[2].lstrip()
+    if not initializer.startswith("["):
         return False
-    eq_index = line.find("=")
-    open_bracket = line.find("[", eq_index)
-    close_bracket = line.find("]", open_bracket + 1) if open_bracket != -1 else -1
-    return open_bracket != -1 and close_bracket != -1 and close_bracket > open_bracket
+    # Captures can contain subscripts, strings and nested lambdas.
+    tokens = re.finditer(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|/\*.*?\*/|//.*|\[|\]''', initializer)
+    depth = 0
+    for token in tokens:
+        if token[0] == "[":
+            depth += 1
+        elif token[0] == "]":
+            depth -= 1
+            if depth == 0:
+                return re.match(r"\s*(?:\(|\{|<|mutable\b|noexcept\b|->|$)", initializer[token.end():]) is not None
+    return False
 
 
 def is_iterator_like(line: str) -> bool:
@@ -184,8 +189,8 @@ def main() -> int:
     args = parse_args()
     repo_root = Path(args.repo_root).resolve()
     allowlist_path = repo_root / args.allowlist
-    allowlist = read_allowlist(allowlist_path)
-    violations = collect_violations(repo_root, allowlist)
+    allowlist = [] if args.write_allowlist else read_allowlist(allowlist_path)
+    violations = collect_violations(repo_root, [] if args.write_allowlist else allowlist)
     if args.write_allowlist:
         write_allowlist(allowlist_path, violations)
         return 0

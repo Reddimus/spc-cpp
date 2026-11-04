@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <new>
 #include <stdexcept>
+#include <thread>
 
 #if defined(__APPLE__)
 #include <malloc/malloc.h>
@@ -32,6 +33,21 @@ struct Counters {
 constinit Counters counters;
 
 constexpr std::memory_order kRelaxed = std::memory_order_relaxed;
+
+// Keep probe transitions and snapshots atomic with respect to accounting.
+// This lock cannot allocate: it is also used from global operator new.
+constinit std::atomic_flag accounting_lock;
+class CounterLock {
+public:
+	CounterLock() noexcept {
+		while (accounting_lock.test_and_set(std::memory_order_acquire)) {
+			std::this_thread::yield();
+		}
+	}
+	~CounterLock() { accounting_lock.clear(std::memory_order_release); }
+	CounterLock(const CounterLock&) = delete;
+	CounterLock& operator=(const CounterLock&) = delete;
+};
 
 // An alignment of 0 means operator new's default.
 void* raw_allocate(std::size_t size, std::size_t alignment) noexcept {
@@ -80,13 +96,16 @@ void* allocate(std::size_t size, std::size_t alignment) {
 		handler();
 		ptr = raw_allocate(request, alignment);
 	}
-	if (counters.active.load(kRelaxed)) {
-		counters.allocations.fetch_add(1, kRelaxed);
-		counters.bytes.fetch_add(size, kRelaxed);
-		const std::int64_t block = block_size(ptr, alignment);
-		const std::int64_t live = counters.live.fetch_add(block, kRelaxed) + block;
-		std::int64_t peak = counters.peak.load(kRelaxed);
-		while (live > peak && !counters.peak.compare_exchange_weak(peak, live, kRelaxed)) {
+	if (counters.active.load(std::memory_order_acquire)) {
+		const CounterLock lock;
+		if (counters.active.load(kRelaxed)) {
+			counters.allocations.fetch_add(1, kRelaxed);
+			counters.bytes.fetch_add(size, kRelaxed);
+			const std::int64_t block = block_size(ptr, alignment);
+			const std::int64_t live = counters.live.fetch_add(block, kRelaxed) + block;
+			std::int64_t peak = counters.peak.load(kRelaxed);
+			while (live > peak && !counters.peak.compare_exchange_weak(peak, live, kRelaxed)) {
+			}
 		}
 	}
 	return ptr;
@@ -104,9 +123,13 @@ void deallocate(void* ptr, std::size_t alignment) noexcept {
 	if (ptr == nullptr) {
 		return;
 	}
-	if (counters.active.load(kRelaxed)) {
-		counters.live.fetch_sub(block_size(ptr, alignment), kRelaxed);
+	if (counters.active.load(std::memory_order_acquire)) {
+		const CounterLock lock;
+		if (counters.active.load(kRelaxed)) {
+			counters.live.fetch_sub(block_size(ptr, alignment), kRelaxed);
+		}
 	}
+
 	raw_free(ptr, alignment);
 }
 
@@ -122,6 +145,7 @@ AllocationProbe::AllocationProbe() {
 	if (counters.owned.exchange(true)) {
 		throw std::logic_error("another AllocationProbe is active");
 	}
+	const CounterLock lock;
 	// Zero before counting starts, so no allocation is counted and then wiped.
 	counters.allocations.store(0);
 	counters.bytes.store(0);
@@ -131,11 +155,13 @@ AllocationProbe::AllocationProbe() {
 }
 
 AllocationProbe::~AllocationProbe() {
+	const CounterLock lock;
 	counters.active.store(false);
 	counters.owned.store(false);
 }
 
 AllocationStats AllocationProbe::stats() const noexcept {
+	const CounterLock lock;
 	AllocationStats stats;
 	stats.allocations = counters.allocations.load();
 	stats.bytes = counters.bytes.load();

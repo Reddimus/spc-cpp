@@ -6,11 +6,14 @@
 #include "support/loopback_server.hpp"
 
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <gtest/gtest.h>
+#include <limits>
+#include <memory>
 #include <string>
 #include <thread>
 #include <utility>
@@ -53,6 +56,41 @@ std::string chunked_response(std::size_t chunks, std::size_t chunk_size) {
 	return response + "0\r\n\r\n";
 }
 
+TEST(LoopbackServer, ShutdownIsBoundedWhenAClientStopsReading) {
+	std::atomic<bool> responding{false};
+	std::unique_ptr<LoopbackServer> server =
+		std::make_unique<LoopbackServer>([&](const LoopbackRequest&) {
+			responding = true;
+			return http_response("200 OK", std::string(8 * 1024 * 1024, 'x'));
+		});
+	struct Socket {
+		test::socket_detail::Socket value;
+		~Socket() { test::socket_detail::close_socket(value); }
+	};
+	const Socket client{::socket(AF_INET, SOCK_STREAM, 0)};
+	ASSERT_NE(client.value, test::socket_detail::kInvalidSocket);
+	const int receive_buffer = 1024;
+	test::socket_detail::set_option(client.value, SO_RCVBUF, &receive_buffer,
+									sizeof(receive_buffer));
+	sockaddr_in address{};
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	address.sin_port = htons(server->port());
+	ASSERT_EQ(::connect(client.value, reinterpret_cast<const sockaddr*>(&address), sizeof(address)),
+			  0);
+	constexpr char request[] = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n";
+	ASSERT_GT(::send(client.value, request, sizeof(request) - 1, 0), 0);
+	const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
+	while (!responding && std::chrono::steady_clock::now() - started < std::chrono::seconds{2}) {
+		std::this_thread::yield();
+	}
+	ASSERT_TRUE(responding);
+	char first_byte{};
+	ASSERT_EQ(::recv(client.value, &first_byte, 1, 0), 1);
+	server.reset(); // The client deliberately keeps its unread socket open.
+	EXPECT_LT(std::chrono::steady_clock::now() - started, std::chrono::seconds{5});
+}
+
 TEST(HttpClient, ReturnsStatusBodyAndSendsTheConfiguredUserAgent) {
 	LoopbackServer server{[](const LoopbackRequest&) {
 		return http_response("404 Not Found", "nope", "X-Test: yes\r\n");
@@ -80,6 +118,50 @@ TEST(HttpClient, RelativePathsUseTheBaseUrl) {
 	ASSERT_TRUE(client.get("/items?x=1"));
 
 	EXPECT_EQ(server.requests().at(0).target, "/api/items?x=1");
+}
+
+TEST(HttpClient, AbsoluteHttpSchemesIgnoreCaseWithABaseUrl) {
+	LoopbackServer server{
+		[](const LoopbackRequest& request) { return http_response("200 OK", request.target); }};
+	ClientConfig config;
+	config.base_url = server.url("/base/");
+	const HttpClient client{config};
+	for (const std::string& scheme : {std::string{"HTTP"}, std::string{"hTtP"}}) {
+		std::string url = server.url("/absolute");
+		url.replace(0, 4, scheme);
+		const Result<HttpResponse> response = client.get(url);
+		ASSERT_TRUE(response) << response.error().message;
+		EXPECT_EQ(response->body, "/absolute");
+	}
+}
+
+TEST(HttpClient, AbsoluteHttpsSchemesNeverUseThePlaintextBaseUrl) {
+	LoopbackServer server{[](const LoopbackRequest&) { return http_response("200 OK", "wrong"); }};
+	ClientConfig config;
+	config.base_url = server.url("/base/");
+	config.timeout = std::chrono::seconds{1};
+	const HttpClient client{config};
+	// Port zero cannot host a server. A misclassified URL instead reaches the
+	// plaintext base and succeeds, exposing an HTTPS request as an HTTP path.
+	EXPECT_FALSE(client.get("HTTPS://127.0.0.1:0/absolute"));
+	EXPECT_FALSE(client.get("hTtPs://127.0.0.1:0/absolute"));
+	EXPECT_TRUE(server.requests().empty());
+}
+
+TEST(HttpClient, RejectsInvalidTimeoutsBeforeSendingARequest) {
+	LoopbackServer server{[](const LoopbackRequest&) { return http_response("200 OK", "{}"); }};
+	for (const std::chrono::seconds timeout :
+		 {std::chrono::seconds{-1},
+		  std::chrono::seconds{std::numeric_limits<int>::max() / 1000 + 1LL},
+		  std::chrono::seconds::max()}) {
+		ClientConfig config;
+		config.timeout = timeout;
+		const HttpClient client{config};
+		const Result<HttpResponse> response = client.get(server.url("/"));
+		ASSERT_FALSE(response);
+		EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest);
+	}
+	EXPECT_TRUE(server.requests().empty());
 }
 
 TEST(HttpClient, KeepsOnlyTheFinalResponseHeadersAfterARedirect) {

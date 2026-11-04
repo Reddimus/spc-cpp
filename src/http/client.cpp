@@ -3,6 +3,7 @@
 #include <array>
 #include <cstddef>
 #include <curl/curl.h>
+#include <limits>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -51,7 +52,8 @@ std::size_t write_body(char* data, std::size_t size, std::size_t count, void* us
 }
 
 bool is_absolute_url(std::string_view path) {
-	return path.starts_with("http://") || path.starts_with("https://");
+	return (path.size() >= 7 && curl_strnequal(path.data(), "http://", 7) != 0) ||
+		   (path.size() >= 8 && curl_strnequal(path.data(), "https://", 8) != 0);
 }
 
 /// libcurl's process-wide state. Each client holds a shared reference, so the
@@ -117,6 +119,14 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	curl_easy_reset(curl);
 	connection.errors.fill('\0');
 
+	if (config.timeout.count() < 0 ||
+		config.timeout.count() > std::numeric_limits<int>::max() / 1000 ||
+		curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(config.timeout.count())) !=
+			CURLE_OK) {
+		return std::unexpected(
+			Error::invalid_request("ClientConfig::timeout is outside libcurl's supported range"));
+	}
+
 	// Refuse to send anything unless the restrictions actually took effect;
 	// an older runtime libcurl rejects CURLOPT_PROTOCOLS_STR and would then
 	// happily read file:// URLs.
@@ -136,7 +146,6 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, connection.errors.data());
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &write_body);
 	curl_easy_setopt(curl, CURLOPT_WRITEDATA, &sink);
-	curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(config.timeout.count()));
 	curl_easy_setopt(curl, CURLOPT_FOLLOWLOCATION, 1L);
 	curl_easy_setopt(curl, CURLOPT_MAXREDIRS, 10L);
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);

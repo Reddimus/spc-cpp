@@ -15,6 +15,7 @@ add_library(spc_core STATIC
 )
 spc_configure_target(spc_core)
 target_compile_features(spc_core PUBLIC cxx_std_23)
+target_link_libraries(spc_core PUBLIC Threads::Threads)
 target_include_directories(spc_core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>

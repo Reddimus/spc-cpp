@@ -32,6 +32,8 @@ struct ClientConfig {
 	/// what the SDK's clients do.
 	std::string base_url;
 	std::string user_agent{"spc-cpp/" SPC_VERSION_STRING " (contact@predictioncast.ai)"};
+	/// Transfer deadline: 0 (unlimited) through INT_MAX / 1000 seconds, for all
+	/// supported libcurl versions. Invalid values fail before sending.
 	std::chrono::seconds timeout{15};
 	bool verify_ssl{true};
 	/// Largest response body accepted. Bodies are held in memory and parsed
@@ -72,9 +74,9 @@ public:
 	HttpClient(const HttpClient&) = delete;
 	HttpClient& operator=(const HttpClient&) = delete;
 
-	/// GET `path`. An absolute `http://` or `https://` URL is used as is;
-	/// anything else is appended to `config().base_url`. Every other scheme,
-	/// such as `file://`, is refused, including on redirects.
+	/// Absolute HTTP and HTTPS URLs use case-insensitive schemes and bypass
+	/// `config().base_url`; other inputs are appended to it. Transfers and
+	/// redirects permit only HTTP and HTTPS.
 	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
 	/// The settings this client was built with; defaults on a moved-from client.

@@ -3,7 +3,10 @@
 /// checks the same fixtures for identical output; this catches a regression
 /// here first.
 
+#include "spc/models/mesoscale.hpp"
 #include "spc/models/outlook.hpp"
+#include "spc/models/storm_report.hpp"
+#include "spc/models/watch.hpp"
 #include "support/fixtures.hpp"
 
 #include <format>
@@ -16,6 +19,15 @@ namespace {
 
 using namespace spc;
 using test::read_fixture;
+
+TEST(Corpus, NonObjectPropertiesDoNotCreateRecords) {
+	for (const std::string_view properties : {"null", "42", "[]", "\"bad\""}) {
+		const std::string body = std::format(R"({{"features":[{{"properties":{}}}]}})", properties);
+		EXPECT_TRUE(parse_watches(body).watches.empty()) << properties;
+		EXPECT_TRUE(parse_storm_reports(body).reports.empty()) << properties;
+		EXPECT_TRUE(parse_mesoscale_discussions(body).discussions.empty()) << properties;
+	}
+}
 
 TEST(Corpus, StaticCategoricalFeeds) {
 	// Uppercase LABEL/ISSUE/VALID/EXPIRE, Polygon and MultiPolygon.

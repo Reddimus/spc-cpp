@@ -5,12 +5,15 @@
 #include "support/allocation_counter.hpp"
 
 #include <array>
+#include <atomic>
 #include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
+#include <latch>
 #include <new>
 #include <stdexcept>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -142,6 +145,39 @@ TEST(AllocationCounter, StartsEachProbeFromZero) {
 	EXPECT_EQ(stats.bytes, 0u);
 	EXPECT_EQ(stats.peak_bytes, 0u);
 	EXPECT_EQ(stats.retained_bytes, 0);
+}
+
+TEST(AllocationCounter, ConcurrentSnapshotsKeepCallAndByteCountsTogether) {
+	std::atomic<bool> start{false};
+	std::atomic<bool> stop{false};
+	std::latch ready{1};
+	std::thread worker([&] {
+		while (!start.load()) {
+			std::this_thread::yield();
+		}
+		for (int warmup = 0; warmup < 100; ++warmup) {
+			void* block = ::operator new(64);
+			::operator delete(block);
+		}
+		ready.count_down();
+		while (!stop.load()) {
+			void* block = ::operator new(64);
+			::operator delete(block);
+		}
+	});
+	bool consistent = true;
+	{
+		const AllocationProbe probe;
+		start = true;
+		ready.wait();
+		for (int sample = 0; sample < 10000; ++sample) {
+			const AllocationStats stats = probe.stats();
+			consistent = consistent && stats.bytes == stats.allocations * 64;
+		}
+	}
+	stop = true;
+	worker.join();
+	EXPECT_TRUE(consistent);
 }
 
 TEST(AllocationCounter, AllowsOneProbeAtATime) {
