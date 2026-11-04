@@ -120,7 +120,7 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	connection.errors.fill('\0');
 
 	if (config.timeout.count() < 0 ||
-		config.timeout.count() > std::numeric_limits<int>::max() / 1000 ||
+		config.timeout.count() > (std::numeric_limits<int>::max)() / 1000 ||
 		curl_easy_setopt(curl, CURLOPT_TIMEOUT, static_cast<long>(config.timeout.count())) !=
 			CURLE_OK) {
 		return std::unexpected(
