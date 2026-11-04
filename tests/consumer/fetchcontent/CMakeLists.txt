@@ -18,3 +18,11 @@ if(SPC_QUICK_START)
     add_executable(spc_quick_start "${SPC_QUICK_START}")
     target_link_libraries(spc_quick_start PRIVATE spc::spc)
 endif()
+
+add_library(spc_fetchcontent_shared SHARED ../shared.cpp)
+set_target_properties(spc_fetchcontent_shared PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+target_link_libraries(spc_fetchcontent_shared PRIVATE spc::spc)
+
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_options(spc_fetchcontent_shared PRIVATE "LINKER:-z,defs")
+endif()

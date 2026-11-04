@@ -36,6 +36,7 @@ lint:
 	@$(SOURCES) | xargs -0 clang-format --dry-run --Werror
 	@python3 tools/cpp_auto_audit.py
 	@python3 tools/test_install_hooks.py
+	@python3 tools/test_cpp_auto_audit.py
 
 lint-md:
 	npx markdownlint-cli2 "**/*.md"

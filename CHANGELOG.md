@@ -6,6 +6,17 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-03
+
+### Fixed
+
+- Reject invalid HTTP timeouts before sending instead of silently disabling the deadline.
+- Support shared-library consumers with PIC and exported thread dependencies.
+- Check explicit types even under build-named parent folders and preserve allowlist entries.
+- Skip non-object properties instead of returning empty watches, storm reports, or discussions.
+- Recognize mixed-case HTTP and HTTPS schemes when a base URL is configured.
+- Publish prerelease tags as GitHub prereleases.
+
 ## [0.4.5] - 2026-10-25
 
 ### Fixed

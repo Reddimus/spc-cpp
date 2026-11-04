@@ -133,6 +133,8 @@ public:
 	LoopbackServer(LoopbackServer&&) = delete;
 	LoopbackServer& operator=(LoopbackServer&&) = delete;
 
+	[[nodiscard]] std::uint16_t port() const { return port_; }
+
 	/// Absolute URL for `target` on this server; a numeric host, so libcurl
 	/// never starts a resolver thread.
 	[[nodiscard]] std::string url(std::string_view target) const {
@@ -166,6 +168,7 @@ private:
 		const timeval timeout{2, 0};
 #endif
 		socket_detail::set_option(client, SO_RCVTIMEO, &timeout, sizeof(timeout));
+		socket_detail::set_option(client, SO_SNDTIMEO, &timeout, sizeof(timeout));
 #ifdef SO_NOSIGPIPE
 		const int no_sigpipe = 1;
 		socket_detail::set_option(client, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
@@ -217,14 +220,14 @@ private:
 		return request;
 	}
 
-	static void send_all(socket_detail::Socket client, const std::string& response) {
+	void send_all(socket_detail::Socket client, const std::string& response) {
 #ifdef MSG_NOSIGNAL
 		constexpr int kFlags = MSG_NOSIGNAL;
 #else
 		constexpr int kFlags = 0;
 #endif
 		std::size_t sent = 0;
-		while (sent < response.size()) {
+		while (sent < response.size() && !stop_.load()) {
 			const socket_detail::IoResult written = ::send(
 				client, response.data() + sent,
 				static_cast<int>(std::min(response.size() - sent, std::size_t{65536})), kFlags);

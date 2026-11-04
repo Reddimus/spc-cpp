@@ -54,7 +54,7 @@ project(myapp LANGUAGES CXX)
 include(FetchContent)
 FetchContent_Declare(spc_cpp
     GIT_REPOSITORY https://github.com/Reddimus/spc-cpp.git
-    GIT_TAG v0.4.5
+    GIT_TAG v0.4.6
 )
 FetchContent_MakeAvailable(spc_cpp)
 add_executable(myapp main.cpp)

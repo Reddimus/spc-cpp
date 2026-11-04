@@ -59,6 +59,7 @@ endfunction()
 # Warnings plus clang-tidy, for the libraries.
 function(spc_configure_target target)
     spc_set_warnings(${target})
+    set_target_properties(${target} PROPERTIES POSITION_INDEPENDENT_CODE ON)
     if(SPC_ENABLE_CLANG_TIDY)
         set_property(TARGET ${target} PROPERTY CXX_CLANG_TIDY
             "${SPC_CLANG_TIDY_EXECUTABLE};--warnings-as-errors=*")
@@ -100,6 +101,7 @@ endif()
 
 # CURLOPT_PROTOCOLS_STR, which keeps the transport on http and https, needs 7.85.
 find_package(CURL 7.85 REQUIRED)
+find_package(Threads REQUIRED)
 
 include(FetchContent)
 
