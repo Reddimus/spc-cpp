@@ -31,7 +31,7 @@ struct WatchPayload {
 };
 
 /// Parse IEM's `spcwatch` GeoJSON.
-/// @throws std::runtime_error if `body` is not valid JSON.
+/// @throws std::runtime_error for invalid JSON or unsupported Esri spatial references.
 [[nodiscard]] WatchPayload parse_watches(std::string_view body);
 
 } // namespace spc

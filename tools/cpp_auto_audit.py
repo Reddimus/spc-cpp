@@ -22,7 +22,7 @@ DEFAULT_ALLOWLIST = "tools/cpp_auto_allowlist.txt"
 WORD_AUTO = re.compile(r"\bauto\b")
 STRUCTURED_BINDING = re.compile(r"\bauto(?:\s*[\*&])?\s*\[")
 DECLARATION_AUTO = re.compile(
-    r"^\s*(?:(?:for|if|switch)\s*\(\s*)?(?:const\s+|constexpr\s+|static\s+|volatile\s+|mutable\s+)*"
+    r"^\s*(?:}\s*)?(?:(?:else\s+)?if(?:\s+constexpr)?\s*\(\s*|(?:for|while|switch)\s*\(\s*)?(?:const\s+|constexpr\s+|static\s+|volatile\s+|mutable\s+)*"
     r"auto(?:\s*[\*&])?\s*(?:\w+|\[)"
 )
 
@@ -110,7 +110,7 @@ def is_lambda_closure(line: str) -> bool:
     if not initializer.startswith("["):
         return False
     # Captures can contain subscripts, strings and nested lambdas.
-    tokens = re.finditer(r'''"(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|/\*.*?\*/|//.*|\[|\]''', initializer)
+    tokens = re.finditer('(?:u8|u|U|L)?R"(?P<raw>[^\\s()\\\\]{0,16})\\(.*?\\)(?P=raw)"|"(?:\\\\.|[^"\\\\])*"|\\b\\d[\\w\'.]*|\'(?:\\\\.|[^\'\\\\])*\'|/\\*.*?\\*/|//.*|\\[|\\]', initializer)
     depth = 0
     for token in tokens:
         if token[0] == "[":
@@ -118,7 +118,7 @@ def is_lambda_closure(line: str) -> bool:
         elif token[0] == "]":
             depth -= 1
             if depth == 0:
-                return re.match(r"\s*(?:\(|\{|<|mutable\b|noexcept\b|->|$)", initializer[token.end():]) is not None
+                return re.match(r"\s*(?:\(|\{|<|\[\[|static\b|constexpr\b|consteval\b|mutable\b|noexcept\b|->|$)", initializer[token.end():]) is not None
     return False
 
 

@@ -17,6 +17,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cmath>
 #include <cstddef>
 #include <cstdlib>
 #include <filesystem>
@@ -45,6 +46,21 @@ struct GoldenCase {
 // Names the case in gtest's failure output.
 void PrintTo(const GoldenCase& golden, std::ostream* out) {
 	*out << golden.fixture;
+}
+
+// Only these captured Esri fixtures require transcendental projection math.
+// Round their test rendering to sub-millimeter degrees to ignore libm rounding.
+std::string projected_fire_weather_text(std::string_view body, std::int32_t day) {
+	FireWeatherPayload payload = parse_fire_weather(body, day, FireWeatherLayer::Outlook);
+	for (FireWeatherFeature& feature : payload.features) {
+		for (Polygon& ring : feature.rings) {
+			for (LonLat& point : ring) {
+				point.lon = std::round(point.lon * 1e9) / 1e9;
+				point.lat = std::round(point.lat * 1e9) / 1e9;
+			}
+		}
+	}
+	return to_text(payload);
 }
 
 const std::vector<GoldenCase> kCases = {
@@ -77,13 +93,9 @@ const std::vector<GoldenCase> kCases = {
 	{"arcgis_day4_8_nonempty.synthetic.json",
 	 [](std::string_view body) { return to_text(parse_day4_8(body, 4)); }},
 	{"arcgis_day1_fire_weather.esri.json",
-	 [](std::string_view body) {
-		 return to_text(parse_fire_weather(body, 1, FireWeatherLayer::Outlook));
-	 }},
+	 [](std::string_view body) { return projected_fire_weather_text(body, 1); }},
 	{"arcgis_day2_fire_weather.esri.json",
-	 [](std::string_view body) {
-		 return to_text(parse_fire_weather(body, 2, FireWeatherLayer::Outlook));
-	 }},
+	 [](std::string_view body) { return projected_fire_weather_text(body, 2); }},
 	{"arcgis_mesoscale_discussion.esri.json",
 	 [](std::string_view body) { return to_text(parse_mesoscale_discussions(body)); }},
 	{"arcgis_mesoscale_discussion_noarea.esri.json",

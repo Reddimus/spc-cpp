@@ -530,6 +530,18 @@ TEST(ClientErrors, AMalformedBodyIsAParseErrorNotAnException) {
 	EXPECT_EQ(from_arcgis.error().code, ErrorCode::ParseError);
 }
 
+TEST(ClientErrors, UnsupportedEsriProjectionBecomesParseError) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses = {
+		{200,
+		 R"({"spatialReference":{"wkid":32612},"features":[{"attributes":{"dn":5},"geometry":{"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}}]})",
+		 {}}};
+	const ArcGISClient client{transport};
+	const Result<FireWeatherPayload> result = client.query_fire_weather(1);
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::ParseError);
+}
+
 // ===== ArchiveClient (IEM) URLs =====
 //
 // Every value is percent-encoded: an ISO offset's '+' would decode as a space

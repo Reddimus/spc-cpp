@@ -104,7 +104,7 @@ FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
 		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});
 		f.valid_until = detail::first_timestamp(*props, {"EXPIRE", "expire"});
-		f.rings = detail::feature_rings(*geometry);
+		f.rings = detail::feature_rings(*geometry, detail::lookup(root, "spatialReference"));
 		if (!f.rings.empty() && (day <= 2 || f.probability > 0.0)) {
 			payload.features.push_back(std::move(f));
 		}

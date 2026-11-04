@@ -23,6 +23,7 @@
 #include <format>
 #include <gtest/gtest.h>
 #include <limits>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -509,6 +510,78 @@ TEST(EsriRings, OrientationHelper) {
 	const Polygon cw = {{0, 0}, {0, 1}, {1, 1}, {1, 0}, {0, 0}};
 	EXPECT_GT(detail::ring_signed_area(ccw), 0.0);
 	EXPECT_LT(detail::ring_signed_area(cw), 0.0);
+}
+
+TEST(Models, EsriWebMercatorFireWeatherUsesGeographicCoordinates) {
+	const FireWeatherPayload payload = parse_fire_weather(
+		read_fixture("arcgis_day1_fire_weather.esri.json"), 1, FireWeatherLayer::Outlook);
+	ASSERT_FALSE(payload.features.empty());
+	ASSERT_FALSE(payload.features.front().rings.empty());
+	ASSERT_FALSE(payload.features.front().rings.front().empty());
+	// Independently projected by ArcGIS GeometryServer from the captured point.
+	const LonLat first = payload.features.front().rings.front().front();
+	EXPECT_NEAR(first.lon, -111.28000000022023, 1e-8);
+	EXPECT_NEAR(first.lat, 34.380000000120639, 1e-8);
+	for (const FireWeatherFeature& feature : payload.features) {
+		for (const Polygon& ring : feature.rings) {
+			for (const LonLat point : ring) {
+				EXPECT_LE(std::abs(point.lon), 180.0);
+				EXPECT_LE(std::abs(point.lat), 90.0);
+			}
+		}
+	}
+}
+
+TEST(Models, UnsupportedEsriSpatialReferencesFailInsteadOfReturningMetersAsDegrees) {
+	EXPECT_THROW(
+		(void)parse_fire_weather(
+			R"({"spatialReference":{"wkid":32612},"features":[{"attributes":{"dn":5},"geometry":{"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}}]})",
+			1, FireWeatherLayer::Outlook),
+		std::runtime_error);
+}
+
+TEST(EsriRings, SpatialReferencesPreserveDegreesAndNormalizeMercatorAliases) {
+	const Json geometry = *detail::parse_root(R"({"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]})");
+	for (const int wkid : {4326, 4269}) {
+		const Json reference = *detail::parse_root(std::format(R"({{"wkid":{}}})", wkid));
+		const std::vector<Polygon> rings = detail::parse_esri_rings(geometry, &reference);
+		ASSERT_EQ(rings.size(), 1u);
+		EXPECT_EQ(rings[0][2].lon, 1.0);
+		EXPECT_EQ(rings[0][2].lat, 1.0);
+	}
+	EXPECT_EQ(detail::parse_esri_rings(geometry)[0][2].lat, 1.0);
+	for (const int wkid : {3857, 102100, 102113}) {
+		const Json reference = *detail::parse_root(std::format(R"({{"wkid":{}}})", wkid));
+		const std::vector<Polygon> rings = detail::parse_esri_rings(geometry, &reference);
+		ASSERT_EQ(rings.size(), 1u);
+		EXPECT_NEAR(rings[0][2].lon, 0.000008983152841195214, 1e-12);
+		EXPECT_NEAR(rings[0][2].lat, 0.000008983152841195177, 1e-12);
+	}
+}
+
+TEST(EsriRings, GeometryReferenceOverridesCollectionAndLatestWkidOverridesLegacy) {
+	const Json geometry = *detail::parse_root(
+		R"({"spatialReference":{"wkid":32612,"latestWkid":4326},"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]})");
+	const Json reference = *detail::parse_root(R"({"wkid":3857})");
+	const std::vector<Polygon> rings = detail::parse_esri_rings(geometry, &reference);
+	ASSERT_EQ(rings.size(), 1u);
+	EXPECT_EQ(rings[0][2].lon, 1.0);
+	EXPECT_EQ(rings[0][2].lat, 1.0);
+}
+
+TEST(EsriRings, InvalidProjectedLongitudeFailsRatherThanWrapping) {
+	const Json geometry = *detail::parse_root(
+		R"({"spatialReference":{"wkid":3857},"rings":[[[30000000,0],[30000000,1],[30000001,1],[30000001,0],[30000000,0]]]})");
+	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+}
+
+TEST(EsriRings, InvalidProjectedLatitudeFailsRatherThanCollapsingToAPole) {
+	for (const double latitude : {-1e20, 1e20}) {
+		const Json geometry = *detail::parse_root(std::format(
+			R"({{"spatialReference":{{"wkid":3857}},"rings":[[[0,{0}],[0,{1}],[1,{1}],[1,{0}],[0,{0}]]]}})",
+			latitude, latitude + 1e10));
+		EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+	}
 }
 
 } // namespace

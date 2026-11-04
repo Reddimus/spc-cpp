@@ -34,11 +34,14 @@ class AutoAuditTests(unittest.TestCase):
         self.assertIn("src/buildsys/builder.cpp:1", result.stderr)
 
     def test_conditional_scalar_initializers_are_checked(self):
-        (self.root / "condition.cpp").write_text("if (auto value = compute(); value) {}\nswitch (auto value = compute(); value) {}\n")
+        (self.root / "condition.cpp").write_text("if (auto value = compute(); value) {}\nswitch (auto value = compute(); value) {}\n} else if (auto value = compute(); value) {}\nwhile (auto value = compute()) {}\nif constexpr (auto value = compute(); value) {}\n")
         result = self.audit()
         self.assertEqual(result.returncode, 1)
         self.assertIn("condition.cpp:1", result.stderr)
         self.assertIn("condition.cpp:2", result.stderr)
+        self.assertIn("condition.cpp:3", result.stderr)
+        self.assertIn("condition.cpp:4", result.stderr)
+        self.assertIn("condition.cpp:5", result.stderr)
 
     def test_lambda_is_allowed_and_deleted_source_is_skipped(self):
         source = self.root / 'lambda café.cpp'
@@ -55,6 +58,11 @@ class AutoAuditTests(unittest.TestCase):
 
     def test_nested_capture_brackets_are_allowed(self):
         (self.root / "nested.cpp").write_text('auto fn = [x = values[0], text = "]"]() { return x; };\n')
+        self.assertEqual(self.audit().returncode, 0)
+
+    def test_cpp23_lambda_specifiers_and_capture_literals_are_allowed(self):
+        source = "auto fn = [n = 1'000, text = R\"tag(\" ] \")tag\"]() constexpr { return n; };\n"
+        (self.root / "literal.cpp").write_text(source + "auto stateless = [] static { return 1; };\n")
         self.assertEqual(self.audit().returncode, 0)
 
     def test_allowlist_regeneration_is_idempotent(self):
