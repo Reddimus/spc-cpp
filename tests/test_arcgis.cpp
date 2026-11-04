@@ -21,8 +21,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <format>
+#include <future>
 #include <gtest/gtest.h>
 #include <limits>
+#include <numbers>
 #include <stdexcept>
 #include <string>
 #include <utility>
@@ -45,7 +47,7 @@ bool inside_any(double lon, double lat, const std::vector<Polygon>& rings) {
 	return in;
 }
 
-// Distance in degrees from a point to the nearest ring edge.
+// Distance in coordinate units from a point to the nearest ring edge.
 double dist_to_boundary(double px, double py, const std::vector<Polygon>& rings) {
 	double best = 1e18;
 	for (const Polygon& r : rings) {
@@ -582,6 +584,209 @@ TEST(EsriRings, InvalidProjectedLatitudeFailsRatherThanCollapsingToAPole) {
 			latitude, latitude + 1e10));
 		EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
 	}
+}
+
+TEST(Models, InvalidProjectedHolesFailBeforeBeingDiscarded) {
+	EXPECT_THROW(
+		(void)parse_fire_weather(
+			R"({"spatialReference":{"wkid":3857},"features":[{"attributes":{"dn":5},"geometry":{"rings":[[[0,0],[0,1],[1,1],[30000000,100000000],[0,0]]]}}]})",
+			1, FireWeatherLayer::Outlook),
+		std::runtime_error);
+}
+
+TEST(EsriRings, MalformedPointsFailBeforeTheWindingFilterForEverySupportedReference) {
+	for (const int wkid : {3857, 102100, 102113, 4326, 4269}) {
+		for (const bool hole : {false, true}) {
+			for (const char* point :
+				 {"null", "0", "[1]", "[\"bad\",1]", "[0,\"bad\"]", "[true,0]"}) {
+				const Json geometry = *detail::parse_root(std::format(
+					R"({{"spatialReference":{{"wkid":{}}},"rings":[[[0,0],{},[1,1],{},[0,0]]]}})",
+					wkid, point, hole ? "[0,1]" : "[1,0]"));
+				EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error)
+					<< "wkid=" << wkid << " hole=" << hole << " point=" << point;
+			}
+		}
+	}
+	const Json no_reference = *detail::parse_root(R"({"rings":[[[0,0],null,[1,1],[1,0],[0,0]]]})");
+	EXPECT_THROW((void)detail::parse_esri_rings(no_reference), std::runtime_error);
+}
+
+TEST(EsriRings, ExtraCoordinateDimensionsRemainSupported) {
+	const Json geometry = *detail::parse_root(
+		R"({"rings":[[[0,0,5,null],[0,1,6,null],[1,1,7,null],[1,0,8,null],[0,0,5,null]]]})");
+	const std::vector<Polygon> rings = detail::parse_esri_rings(geometry);
+	ASSERT_EQ(rings.size(), 1u);
+	ASSERT_EQ(rings[0].size(), 5u);
+	EXPECT_DOUBLE_EQ(rings[0][2].lon, 1.0);
+	EXPECT_DOUBLE_EQ(rings[0][2].lat, 1.0);
+}
+
+TEST(EsriRings, ProjectedEdgesPreserveMembershipIncludingImplicitClosingEdge) {
+	// In the source plane the triangle's diagonal is y = bottom + x * slope.
+	// Probe 20 projected metres to either side, using the independent sinh
+	// inverse formula to express those probes in geographic coordinates.
+	constexpr double kRadius = 6378137.0;
+	constexpr double kDegrees = 180.0 / std::numbers::pi;
+	for (const double bottom : {0.0, -10000000.0}) {
+		for (const bool closed : {false, true}) {
+			const std::string closing = closed ? std::format(",[0,{}]", bottom) : "";
+			const Json geometry = *detail::parse_root(std::format(
+				R"({{"spatialReference":{{"wkid":3857}},"rings":[[[0,{}],[0,10000000],[10000000,10000000]{}]]}})",
+				bottom, closing));
+			const std::vector<Polygon> rings = detail::parse_esri_rings(geometry);
+			ASSERT_EQ(rings.size(), 1u);
+			for (std::size_t i = 0; i < rings[0].size(); ++i) {
+				const LonLat a = rings[0][i];
+				const LonLat b = rings[0][(i + 1) % rings[0].size()];
+				if (a.lon == b.lon || a.lat == b.lat) {
+					continue;
+				}
+				for (const double t : {0.25, 0.5, 0.75}) {
+					const double x = std::lerp(a.lon, b.lon, t) / kDegrees * kRadius;
+					const double y = bottom + x * (10000000.0 - bottom) / 10000000.0;
+					const double expected = std::atan(std::sinh(y / kRadius));
+					const double actual = std::lerp(a.lat, b.lat, t) / kDegrees;
+					EXPECT_LE(std::abs(actual - expected) * kRadius, 1.0);
+				}
+			}
+			for (const double x : {1000000.0, 3000000.0, 7000000.0, 9000000.0}) {
+				for (const double offset : {-20.0, 20.0}) {
+					const double y = bottom + x * (10000000.0 - bottom) / 10000000.0 + offset;
+					const double lon = x / kRadius * kDegrees;
+					const double lat = std::atan(std::sinh(y / kRadius)) * kDegrees;
+					EXPECT_EQ(point_in_polygon(lon, lat, rings[0]), offset > 0.0)
+						<< "bottom=" << bottom << " closed=" << closed << " x=" << x
+						<< " offset=" << offset;
+				}
+			}
+			if (closed) {
+				EXPECT_DOUBLE_EQ(rings[0].front().lon, rings[0].back().lon);
+				EXPECT_DOUBLE_EQ(rings[0].front().lat, rings[0].back().lat);
+			}
+		}
+	}
+}
+
+TEST(EsriRings, ProjectedExpansionBudgetFailsInsteadOfReturningInaccurateEdges) {
+	std::string points;
+	for (int i = 0; i < 300; ++i) {
+		points += "[-19000000,-19000000],[-19000000,19000000],[19000000,19000000],";
+	}
+	points += "[-19000000,-19000000]";
+	const Json geometry = *detail::parse_root(
+		std::format(R"({{"spatialReference":{{"wkid":3857}},"rings":[[{}]]}})", points));
+	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+}
+
+TEST(EsriRings, ProjectedExpansionBudgetAppliesAcrossAllRings) {
+	std::string rings;
+	for (int i = 0; i < 300; ++i) {
+		if (i != 0) {
+			rings += ',';
+		}
+		rings += "[[-19000000,-19000000],[-19000000,19000000],[19000000,19000000],[-19000000,-"
+				 "19000000]]";
+	}
+	const Json geometry = *detail::parse_root(
+		std::format(R"({{"spatialReference":{{"wkid":3857}},"rings":[{}]}})", rings));
+	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+}
+
+std::string projected_feature_payload(std::size_t count) {
+	std::string features;
+	for (std::size_t i = 0; i < count; ++i) {
+		if (i != 0) {
+			features += ',';
+		}
+		features +=
+			R"({"properties":{"dn":15,"LABEL":"15","name":"Risk","number":1},"geometry":{"rings":[[[-19000000,-19000000],[-19000000,19000000],[19000000,19000000],[-19000000,-19000000]]]}})";
+	}
+	return std::format(R"({{"spatialReference":{{"wkid":3857}},"features":[{}]}})", features);
+}
+
+TEST(Models, ProjectionExpansionBudgetSpansEveryFeatureInThePayload) {
+	const std::string body = projected_feature_payload(300);
+	EXPECT_THROW((void)parse_fire_weather(body, 1, FireWeatherLayer::Outlook), std::runtime_error);
+	EXPECT_THROW((void)parse_day4_8(body, 4), std::runtime_error);
+	EXPECT_THROW((void)parse_conditional_intensity(body, 1, "tornado"), std::runtime_error);
+	EXPECT_THROW((void)parse_mesoscale_discussions(body), std::runtime_error);
+	EXPECT_THROW((void)parse_watches(body), std::runtime_error);
+}
+
+TEST(Models, ProjectionBudgetsAreIndependentForSequentialAndConcurrentPayloads) {
+	const std::string body = projected_feature_payload(200);
+	auto parse_count = [&body] {
+		return parse_fire_weather(body, 1, FireWeatherLayer::Outlook).features.size();
+	};
+	std::future<std::size_t> first = std::async(std::launch::async, parse_count);
+	std::future<std::size_t> second = std::async(std::launch::async, parse_count);
+	EXPECT_EQ(first.get(), 200u);
+	EXPECT_EQ(second.get(), 200u);
+	EXPECT_EQ(parse_count(), 200u);
+	EXPECT_EQ(parse_count(), 200u);
+}
+
+TEST(Models, GeometryReferenceOverridesDoNotLeakBetweenFeatures) {
+	const FireWeatherPayload payload = parse_fire_weather(
+		R"({"spatialReference":{"wkid":3857},"features":[{"properties":{"dn":5},"geometry":{"spatialReference":{"wkid":4326},"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}},{"properties":{"dn":5},"geometry":{"rings":[[[0,0],[0,1],[1,1],[1,0],[0,0]]]}}]})",
+		1, FireWeatherLayer::Outlook);
+	ASSERT_EQ(payload.features.size(), 2u);
+	ASSERT_EQ(payload.features[0].rings.size(), 1u);
+	ASSERT_EQ(payload.features[1].rings.size(), 1u);
+	EXPECT_DOUBLE_EQ(payload.features[0].rings[0][2].lat, 1.0);
+	EXPECT_NEAR(payload.features[1].rings[0][2].lat, 0.000008983152841195177, 1e-12);
+}
+
+TEST(ArcGISParity, CapturedMercatorFireWeatherKeepsProjectedPlaneMembership) {
+	constexpr double kRadius = 6378137.0;
+	constexpr double kDegrees = 180.0 / std::numbers::pi;
+	std::size_t probes = 0;
+	for (const char* fixture :
+		 {"arcgis_day1_fire_weather.esri.json", "arcgis_day2_fire_weather.esri.json"}) {
+		const Json root = *detail::parse_root(read_fixture(fixture));
+		for (const Json& feature : detail::lookup(root, "features")->get_array()) {
+			const Json& geometry = *detail::lookup(feature, "geometry");
+			const std::vector<Polygon> geographic =
+				detail::parse_esri_rings(geometry, detail::lookup(root, "spatialReference"));
+			std::size_t outer = 0;
+			for (const Json& raw_ring : detail::lookup(geometry, "rings")->get_array()) {
+				Polygon projected;
+				for (const Json& point : raw_ring.get_array()) {
+					projected.push_back(
+						{point.get_array()[0].get<double>(), point.get_array()[1].get<double>()});
+				}
+				if (detail::ring_signed_area(projected) > 0.0) {
+					continue;
+				}
+				ASSERT_LT(outer, geographic.size());
+				const std::vector<Polygon> projected_rings{projected};
+				for (std::size_t i = 1; i < projected.size(); ++i) {
+					const LonLat a = projected[i - 1];
+					const LonLat b = projected[i];
+					const double length = std::hypot(b.lon - a.lon, b.lat - a.lat);
+					if (length == 0.0) {
+						continue;
+					}
+					for (const double offset : {-20.0, 20.0}) {
+						const double x = (a.lon + b.lon) / 2.0 - (b.lat - a.lat) / length * offset;
+						const double y = (a.lat + b.lat) / 2.0 + (b.lon - a.lon) / length * offset;
+						if (dist_to_boundary(x, y, projected_rings) < 2.0) {
+							continue;
+						}
+						const double lon = x / kRadius * kDegrees;
+						const double lat = std::atan(std::sinh(y / kRadius)) * kDegrees;
+						EXPECT_EQ(point_in_polygon(lon, lat, geographic[outer]),
+								  point_in_polygon(x, y, projected))
+							<< fixture << " edge=" << i << " offset=" << offset;
+						++probes;
+					}
+				}
+				++outer;
+			}
+			EXPECT_EQ(outer, geographic.size());
+		}
+	}
+	EXPECT_GT(probes, 100u);
 }
 
 } // namespace

@@ -26,7 +26,7 @@ struct MesoscalePayload {
 /// Parse the mesoscale-discussion layer (Esri or GeoJSON). The "NoArea"
 /// placeholder NOAA publishes when nothing is active is skipped, so an empty
 /// result means no active discussions.
-/// @throws std::runtime_error for invalid JSON or unsupported Esri spatial references.
+/// @throws std::runtime_error for invalid JSON or Esri geometry that cannot be converted.
 [[nodiscard]] MesoscalePayload parse_mesoscale_discussions(std::string_view body);
 
 } // namespace spc

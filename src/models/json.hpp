@@ -61,10 +61,13 @@ std::vector<Polygon> parse_rings(const Json& geom);
 /// Outer rings of an Esri `{"rings": [...]}` geometry. Esri mixes outer
 /// rings (clockwise) and holes (counter-clockwise) in one list; the holes are
 /// dropped so the result matches `parse_rings` for the same layer. Web Mercator
-/// is converted to degrees; a geometry reference overrides the response reference.
+/// is converted to degrees with at most one metre of boundary error. A geometry
+/// needing over one million added points fails. A geometry reference overrides
+/// the response reference.
+/// Malformed points fail for every supported spatial reference.
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference = nullptr);
 
-/// Shoelace signed area; positive means counter-clockwise in lon/lat.
+/// Shoelace signed area; positive means counter-clockwise.
 double ring_signed_area(const Polygon& ring);
 
 /// Parse `body`, or return Glaze's formatted error message.
@@ -83,8 +86,22 @@ Json parse_root_or_throw(std::string_view body);
 /// A feature's fields: GeoJSON `properties` or Esri `attributes`.
 const Json* feature_fields(const Json& feature);
 
-/// Rings from either geometry shape: Esri `rings` or GeoJSON `coordinates`.
-std::vector<Polygon> feature_rings(const Json& geometry, const Json* reference = nullptr);
+/// One per payload: shares the collection reference and projection budget
+/// across all features, accepting Esri rings or GeoJSON coordinates.
+class PayloadGeometryParser {
+public:
+	explicit PayloadGeometryParser(const Json& root);
+	~PayloadGeometryParser() = default;
+	PayloadGeometryParser(const PayloadGeometryParser&) = delete;
+	PayloadGeometryParser& operator=(const PayloadGeometryParser&) = delete;
+	PayloadGeometryParser(PayloadGeometryParser&&) = delete;
+	PayloadGeometryParser& operator=(PayloadGeometryParser&&) = delete;
+	std::vector<Polygon> parse(const Json& geometry);
+
+private:
+	const Json* reference_;
+	std::size_t remaining_added_points_;
+};
 
 /// The first non-empty string among `keys`, e.g. {"LABEL", "label"}.
 std::string first_string(const Json& obj, std::initializer_list<const char*> keys);
