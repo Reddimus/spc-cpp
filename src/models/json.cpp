@@ -212,7 +212,8 @@ std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
 			constexpr double kDegrees = 180.0 / std::numbers::pi;
 			for (LonLat& point : r) {
 				if (!std::isfinite(point.lon) || !std::isfinite(point.lat) ||
-					std::abs(point.lon) > kRadius * std::numbers::pi) {
+					std::abs(point.lon) > kRadius * std::numbers::pi ||
+					std::abs(point.lat) > kRadius * std::numbers::pi) {
 					throw std::runtime_error("Invalid Esri Web Mercator coordinates");
 				}
 				point.lon = (point.lon / kRadius) * kDegrees;

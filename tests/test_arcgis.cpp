@@ -575,4 +575,13 @@ TEST(EsriRings, InvalidProjectedLongitudeFailsRatherThanWrapping) {
 	EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
 }
 
+TEST(EsriRings, InvalidProjectedLatitudeFailsRatherThanCollapsingToAPole) {
+	for (const double latitude : {-1e20, 1e20}) {
+		const Json geometry = *detail::parse_root(std::format(
+			R"({{"spatialReference":{{"wkid":3857}},"rings":[[[0,{0}],[0,{1}],[1,{1}],[1,{0}],[0,{0}]]]}})",
+			latitude, latitude + 1e10));
+		EXPECT_THROW((void)detail::parse_esri_rings(geometry), std::runtime_error);
+	}
+}
+
 } // namespace

@@ -11,7 +11,6 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Fixed
 
 - Convert Esri Web Mercator coordinates to longitude/latitude; reject unsupported projections.
-
 - Reject invalid HTTP timeouts before sending instead of silently disabling the deadline.
 - Support shared-library consumers with PIC and exported thread dependencies.
 - Check explicit types even under build-named parent folders and preserve allowlist entries.
