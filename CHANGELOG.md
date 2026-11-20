@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.8] - 2026-11-20
+
 ### Security
 
 - An HTTPS request no longer follows a redirect to plain HTTP; it fails with
