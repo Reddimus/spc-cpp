@@ -3,9 +3,11 @@
 /// IEM archive.
 ///
 /// Every method returns `Result<T>` and never throws for network or data
-/// errors. Clients are move-only; a moved-from client may only be assigned
-/// to or destroyed. A client is safe to use from several threads when its
-/// transport is; the default `HttpClient` is.
+/// errors. A std::exception raised inside a call, std::bad_alloc included,
+/// comes back as `ErrorCode::ParseError`; any other exception, which only a
+/// custom transport can throw, propagates. Clients are move-only; a moved-from
+/// client may only be assigned to or destroyed. A client is safe to use from
+/// several threads when its transport is; the default `HttpClient` is.
 
 #pragma once
 
@@ -80,7 +82,16 @@ enum class ArcGISService : std::uint8_t {
 /// SPC products from NOAA's ArcGIS MapServers (mapservices.weather.noaa.gov).
 ///
 /// An empty product is a successful, empty payload. Queries page through
-/// results automatically.
+/// results automatically, and a transient ArcGIS error sent with HTTP 200 is
+/// retried like the same HTTP status, one page at a time.
+///
+/// The server decides how many pages a query has, so a call is bounded as a
+/// whole. Its pages, across every layer it reads, may total
+/// `ClientConfig::max_response_bytes` (64 MiB when the transport is not an
+/// `HttpClient`) and add one million projected points; past either the call
+/// fails with `InvalidRequest` or `ParseError`. The first response counts
+/// toward the total but is never refused by it: one response is the
+/// transport's to bound.
 class ArcGISClient {
 public:
 	explicit ArcGISClient(ClientConfig config = {});
@@ -116,7 +127,8 @@ public:
 	/// Active mesoscale discussions; empty when none are active.
 	[[nodiscard]] Result<MesoscalePayload> query_active_md() const;
 
-	/// Any layer on one of the three MapServers. Returns each page's raw body.
+	/// Any layer on one of the three MapServers. Returns each page's raw body;
+	/// the call's byte limit bounds what they hold together.
 	[[nodiscard]] Result<std::vector<std::string>>
 	query_layer(ArcGISService service, std::int32_t layer_id, const QueryParams& params) const;
 

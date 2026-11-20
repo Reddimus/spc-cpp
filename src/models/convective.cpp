@@ -26,14 +26,15 @@ std::uint8_t cig_severity_from_label(std::string_view label) noexcept {
 	return 0;
 }
 
-Day48OutlookPayload detail::day4_8_from_tree(const Json& root, std::int32_t day) {
+Day48OutlookPayload detail::day4_8_from_tree(const Json& root, std::int32_t day,
+											 detail::ProjectionBudget* budget) {
 	Day48OutlookPayload payload;
 	payload.day = day;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	detail::PayloadGeometryParser geometry_parser(root);
+	detail::PayloadGeometryParser geometry_parser(root, budget);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
 		const Json* geometry = detail::lookup(feat, "geometry");
@@ -60,7 +61,8 @@ Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day) {
 }
 
 ConditionalIntensityPayload
-detail::conditional_intensity_from_tree(const Json& root, std::int32_t day, std::string hazard) {
+detail::conditional_intensity_from_tree(const Json& root, std::int32_t day, std::string hazard,
+										detail::ProjectionBudget* budget) {
 	ConditionalIntensityPayload payload;
 	payload.day = day;
 	payload.hazard = std::move(hazard);
@@ -68,7 +70,7 @@ detail::conditional_intensity_from_tree(const Json& root, std::int32_t day, std:
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	detail::PayloadGeometryParser geometry_parser(root);
+	detail::PayloadGeometryParser geometry_parser(root, budget);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
 		const Json* geometry = detail::lookup(feat, "geometry");

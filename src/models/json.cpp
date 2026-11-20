@@ -20,7 +20,6 @@ struct JsonReadOptions : glz::opts {
 
 constexpr double kMercatorRadius = 6378137.0;
 constexpr double kDegrees = 180.0 / std::numbers::pi;
-constexpr std::size_t kMaxAddedProjectionPoints = 1000000;
 
 void validate_mercator(const Polygon& ring) {
 	for (const LonLat point : ring) {
@@ -300,8 +299,8 @@ std::vector<Polygon> parse_esri_rings_with_budget(const Json& geom, const Json* 
 } // namespace
 
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
-	std::size_t remaining = kMaxAddedProjectionPoints;
-	return parse_esri_rings_with_budget(geom, reference, remaining);
+	ProjectionBudget budget;
+	return parse_esri_rings_with_budget(geom, reference, budget.remaining_added_points);
 }
 
 glz::expected<Json, std::string> parse_root(std::string_view body) {
@@ -357,13 +356,12 @@ const Json* feature_fields(const Json& feature) {
 	return fields != nullptr && fields->is_object() ? fields : nullptr;
 }
 
-PayloadGeometryParser::PayloadGeometryParser(const Json& root)
-	: reference_(lookup(root, "spatialReference")),
-	  remaining_added_points_(kMaxAddedProjectionPoints) {}
+PayloadGeometryParser::PayloadGeometryParser(const Json& root, ProjectionBudget* shared)
+	: reference_(lookup(root, "spatialReference")), budget_(shared != nullptr ? shared : &own_) {}
 
 std::vector<Polygon> PayloadGeometryParser::parse(const Json& geometry) {
 	return lookup(geometry, "rings") != nullptr
-			   ? parse_esri_rings_with_budget(geometry, reference_, remaining_added_points_)
+			   ? parse_esri_rings_with_budget(geometry, reference_, budget_->remaining_added_points)
 			   : parse_rings(geometry);
 }
 

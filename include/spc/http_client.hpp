@@ -39,13 +39,16 @@ struct ClientConfig {
 	/// Largest decoded body accepted from the final response; 0 means no
 	/// limit. Bodies are held in memory and parsed whole, and an IEM date
 	/// range can be arbitrarily large. A bigger response fails with
-	/// `ErrorCode::InvalidRequest` and is not retried.
+	/// `ErrorCode::InvalidRequest` and is not retried. `ArcGISClient` applies
+	/// the same limit to the pages of one call together.
 	std::size_t max_response_bytes{64UL * 1024UL * 1024UL};
 };
 
 /// The GET interface the clients use. Implement it to supply your own
 /// network stack or canned test responses. One transport may be shared by
 /// several clients and threads, so `get` must be safe to call concurrently.
+/// Report failures as an `Error`: a std::exception thrown from `get` reaches
+/// the client's caller as `ErrorCode::ParseError`, and any other propagates.
 class HttpTransport {
 public:
 	virtual ~HttpTransport() = default;

@@ -10,6 +10,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An HTTPS request no longer follows a redirect to plain HTTP; it fails with
   `InvalidRequest`.
+- Bound memory across all pages of an ArcGIS call. One Web Mercator expansion
+  budget covers the whole call, both fire-weather layers included, and the pages
+  together may not exceed `ClientConfig::max_response_bytes` (`InvalidRequest`).
+  Before, a paging server could make one call hold gigabytes.
 
 ### Changed
 
@@ -19,6 +23,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Report a malformed URL or a scheme other than HTTP(S) as `InvalidRequest`, and a
   redirect loop as `ServerError`. `with_retry` no longer repeats them.
 - Map only HTTP 500-599 to `ServerError`; a status above 599 is `Unknown`.
+- Retry ArcGIS 429 and 5xx errors sent in HTTP 200 bodies like the same HTTP
+  status, one page at a time.
+- An ArcGIS error without a usable code reports `http_status` 0 and
+  `arcgisCode=0` instead of a made-up 400.
 
 ### Fixed
 
@@ -28,6 +36,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Cap a `Retry-After` too large for int64 at the longest wait instead of ignoring it.
 - Reset the daily quota when the clock steps back across midnight.
 - Initialize `HttpResponse::status_code` to 0.
+- A `std::exception` inside any client call, `std::bad_alloc` included, returns
+  `ParseError` instead of escaping from ArcGIS calls.
 - Skip features whose fields are not an object, conditional-intensity polygons
   without a label, and day 1-2 fire-weather polygons with no known `dn` band.
 - Read the numeric strings `"nan"` and `"inf"` as 0 instead of passing them on.

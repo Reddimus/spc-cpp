@@ -63,8 +63,8 @@ std::vector<Polygon> parse_rings(const Json& geom);
 /// rings (clockwise) and holes (counter-clockwise) in one list; the holes are
 /// dropped so the result matches `parse_rings` for the same layer. Web Mercator
 /// is converted to degrees with at most one metre of boundary error. A geometry
-/// needing over one million added points fails. A geometry reference overrides
-/// the response reference.
+/// needing more added points than its payload's `ProjectionBudget` has left
+/// fails. A geometry reference overrides the response reference.
 /// Malformed points fail for every supported spatial reference.
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference = nullptr);
 
@@ -88,11 +88,21 @@ Json parse_root_or_throw(std::string_view body);
 /// when they are missing or not an object.
 const Json* feature_fields(const Json& feature);
 
-/// One per payload: shares the collection reference and projection budget
-/// across all features, accepting Esri rings or GeoJSON coordinates.
+/// The points Web Mercator projection may still add to one payload: one
+/// million, 16 MB, at the start. An edge is subdivided every 10 km, so 20
+/// bytes of JSON can add 4,000 points.
+struct ProjectionBudget {
+	std::size_t remaining_added_points{1000000};
+};
+
+/// One per response: shares the collection reference and projection budget
+/// across all features, accepting Esri rings or GeoJSON coordinates. The
+/// budget is the payload's. A caller that builds one payload from several
+/// responses passes the same `shared` budget for each; otherwise the response
+/// is the payload and the parser uses its own.
 class PayloadGeometryParser {
 public:
-	explicit PayloadGeometryParser(const Json& root);
+	explicit PayloadGeometryParser(const Json& root, ProjectionBudget* shared = nullptr);
 	~PayloadGeometryParser() = default;
 	PayloadGeometryParser(const PayloadGeometryParser&) = delete;
 	PayloadGeometryParser& operator=(const PayloadGeometryParser&) = delete;
@@ -102,7 +112,8 @@ public:
 
 private:
 	const Json* reference_;
-	std::size_t remaining_added_points_;
+	ProjectionBudget own_;
+	ProjectionBudget* budget_;
 };
 
 /// The first non-empty string among `keys`, e.g. {"LABEL", "label"}.

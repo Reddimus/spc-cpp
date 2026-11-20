@@ -1,6 +1,7 @@
 /// @file client.cpp
 /// @brief StaticFeedClient, ArcGISClient, and ArchiveClient.
 
+#include "api/call_budget.hpp"
 #include "models/from_tree.hpp"
 #include "models/json.hpp"
 #include "spc/api.hpp"
@@ -10,11 +11,13 @@
 
 #include <array>
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <exception>
 #include <format>
 #include <iterator>
 #include <memory>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <string_view>
@@ -26,6 +29,7 @@ namespace spc {
 
 namespace {
 
+using detail::CallBudget;
 using detail::Json;
 
 constexpr std::string_view kStaticOutlookBase = "https://www.spc.noaa.gov/products/outlook/";
@@ -186,13 +190,30 @@ Result<std::string> body_or_error(Result<HttpResponse> response, Feed404 semanti
 	return std::unexpected(Error::from_response(response->status_code, response->body, semantics));
 }
 
-/// Run `parse` and turn its std::runtime_error into a ParseError.
+/// The Error for the std::exception being handled; call it only inside a
+/// catch block for one. ParseError, as for a parser's std::runtime_error: the
+/// response could not be turned into a result. Other exceptions propagate:
+/// catching everything would also swallow a thread cancellation.
+Error current_failure() noexcept {
+	try {
+		try {
+			throw;
+		} catch (const std::exception& e) {
+			return Error::parse(e.what());
+		}
+	} catch (const std::exception&) {
+		// No memory for the message either; an empty string needs none.
+		return {ErrorCode::ParseError, {}, 0, {}};
+	}
+}
+
+/// Run `parse` and turn the std::exception it throws into a ParseError.
 template <typename Parse>
 Result<std::invoke_result_t<const Parse&>> parsed(const Parse& parse) {
 	try {
 		return parse();
-	} catch (const std::exception& e) {
-		return std::unexpected(Error::parse(e.what()));
+	} catch (const std::exception&) {
+		return std::unexpected(current_failure());
 	}
 }
 
@@ -236,10 +257,12 @@ bool envelope_flag(const Json& root, const char* key) {
 Result<ArcGISEnvelope> inspect_arcgis_envelope(const Json& root, const std::string& body) {
 	const Json* error = detail::lookup(root, "error");
 	if (error != nullptr && error->is_object()) {
-		// ArcGIS reports failures with HTTP 200 and an error object.
+		// ArcGIS reports failures with HTTP 200 and an error object. The code
+		// is passed on as sent; a missing or non-numeric one is 0, not a
+		// made-up status.
 		const std::int32_t code =
 			detail::to_int32(detail::json_number_or_numeric_string(*error, "code")).value_or(0);
-		return std::unexpected(Error::from_arcgis(code > 0 ? code : 400, body));
+		return std::unexpected(Error::from_arcgis(code, body));
 	}
 	ArcGISEnvelope envelope;
 	// f=json puts the flag at the root; f=geojson puts it at the root and
@@ -275,6 +298,12 @@ Result<ArcGISPage> parse_arcgis_page(const std::string& body) {
 	}
 	return ArcGISPage{std::move(*root), *envelope};
 }
+
+/// One accepted page: its body and what was parsed from it.
+struct FetchedPage {
+	std::string body;
+	ArcGISPage page;
+};
 
 bool is_json_format(std::string_view format) {
 	return format == "json" || format == "pjson" || format == "geojson";
@@ -346,7 +375,7 @@ StaticFeedClient::~StaticFeedClient() = default;
 StaticFeedClient::StaticFeedClient(StaticFeedClient&&) noexcept = default;
 StaticFeedClient& StaticFeedClient::operator=(StaticFeedClient&&) noexcept = default;
 
-Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t day) const {
+Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t day) const try {
 	if (day < 1 || day > 3) {
 		return std::unexpected(
 			Error::invalid_request("categorical outlook day must be 1, 2, or 3"));
@@ -354,10 +383,12 @@ Result<CategoricalOutlookPayload> StaticFeedClient::day_categorical(std::int32_t
 	return built_from(
 		impl_->fetch(std::format("{}day{}otlk_cat.nolyr.geojson", kStaticOutlookBase, day)),
 		[day](const Json& root) { return detail::categorical_from_tree(root, day); });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
-															   std::string_view hazard) const {
+															   std::string_view hazard) const try {
 	const std::string_view normalized = normalized_hazard(day, hazard);
 	if (day1_3_probability_layer(day, normalized) == nullptr) {
 		return std::unexpected(unsupported_probability());
@@ -370,15 +401,19 @@ Result<ProbOutlookPayload> StaticFeedClient::day_probabilistic(std::int32_t day,
 	return built_from(impl_->fetch(url), [day, normalized](const Json& root) {
 		return detail::probabilistic_from_tree(root, day, normalized);
 	});
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
-Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) const {
+Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) const try {
 	if (day < 4 || day > 8) {
 		return std::unexpected(
 			Error::invalid_request("extended outlook day must be between 4 and 8"));
 	}
 	return built_from(impl_->fetch(std::format("{}day{}prob.nolyr.geojson", kStaticDay48Base, day)),
 					  [day](const Json& root) { return detail::day4_8_from_tree(root, day); });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 // ===================== ArcGISClient =====================
@@ -386,36 +421,77 @@ Result<Day48OutlookPayload> StaticFeedClient::day4_8(std::int32_t day) const {
 struct ArcGISClient::Impl {
 	std::shared_ptr<HttpTransport> http;
 	RetryPolicy retry;
+	/// Total page bytes one call accepts.
+	std::size_t max_call_bytes;
 
 	explicit Impl(std::shared_ptr<HttpTransport> transport)
-		: http(usable_transport(std::move(transport))) {}
+		: http(usable_transport(std::move(transport))),
+		  max_call_bytes(detail::call_byte_limit(*http)) {}
 
-	/// Fetch every page of `query`, parse each once, and hand `on_page` the
-	/// page's body and tree as it arrives. `on_page` may take the body. A 404
-	/// is NotFound: ArcGIS reports an empty product as HTTP 200 with no
-	/// features.
+	[[nodiscard]] CallBudget call_budget() const noexcept { return CallBudget{max_call_bytes}; }
+
+	/// GET one page and parse it, retrying under `retry`. ArcGIS sends its own
+	/// failures with HTTP 200, so the body is parsed inside the retry loop and
+	/// a transient ArcGIS code is retried like the same HTTP status. A 404 is
+	/// NotFound: ArcGIS reports an empty product as HTTP 200 with no features.
+	[[nodiscard]] Result<FetchedPage> fetch_page(const std::string& url,
+												 const CallBudget& budget) const {
+		// What the latest attempt's HTTP 200 body parsed to.
+		std::optional<Result<ArcGISPage>> page;
+		Result<HttpResponse> response = with_retry(
+			[&]() -> Result<HttpResponse> {
+				page.reset();
+				Result<HttpResponse> attempt = http->get(url);
+				if (!attempt || attempt->status_code != 200) {
+					return attempt;
+				}
+				if (!budget.admits(attempt->body.size())) {
+					// Refused before parsing, which would hold several times the body.
+					return std::unexpected(Error::invalid_request(
+						"ArcGIS query pages exceeded ClientConfig::max_response_bytes in total"));
+				}
+				page.emplace(parse_arcgis_page(attempt->body));
+				if (!page->has_value() && page->error().http_status != 0) {
+					// An ArcGIS error whose code is an HTTP status: let
+					// with_retry judge that status.
+					attempt->status_code = static_cast<std::int16_t>(page->error().http_status);
+				}
+				return attempt;
+			},
+			retry);
+		if (!response) {
+			return std::unexpected(std::move(response.error()));
+		}
+		if (!page) {
+			return std::unexpected(
+				Error::from_response(response->status_code, response->body, Feed404::NotFound));
+		}
+		if (!page->has_value()) {
+			return std::unexpected(std::move(page->error()));
+		}
+		return FetchedPage{std::move(response->body), std::move(**page)};
+	}
+
+	/// Fetch every page of `query`, charge each to `budget`, and hand `on_page`
+	/// the page's body and tree as it arrives. `on_page` may take the body.
 	template <typename OnPage>
 		requires std::is_invocable_r_v<Result<void>, const OnPage&, std::string&, const Json&>
-	[[nodiscard]] Result<void> paged(const LayerQuery& query, const OnPage& on_page) const {
+	[[nodiscard]] Result<void> paged(const LayerQuery& query, CallBudget& budget,
+									 const OnPage& on_page) const {
 		ArcGISPager pager;
 		while (pager.has_more()) {
-			const std::string url = page_url(query, pager);
-			Result<std::string> body =
-				body_or_error(with_retry([&] { return http->get(url); }, retry), Feed404::NotFound);
-			if (!body) {
-				return std::unexpected(body.error());
+			Result<FetchedPage> fetched = fetch_page(page_url(query, pager), budget);
+			if (!fetched) {
+				return std::unexpected(std::move(fetched.error()));
 			}
-			const Result<ArcGISPage> page = parse_arcgis_page(*body);
-			if (!page) {
-				return std::unexpected(page.error());
-			}
-			const ArcGISEnvelope envelope = page->envelope;
+			budget.charge(fetched->body.size());
+			const ArcGISEnvelope envelope = fetched->page.envelope;
 			if (envelope.exceeded_transfer_limit && envelope.feature_count == 0) {
 				// The offset would never move.
 				return std::unexpected(
 					Error::server("ArcGIS reported a truncated page containing no records"));
 			}
-			Result<void> accepted = on_page(*body, page->root);
+			Result<void> accepted = on_page(fetched->body, fetched->page.root);
 			if (!accepted) {
 				return accepted;
 			}
@@ -432,25 +508,26 @@ struct ArcGISClient::Impl {
 	/// `build`, and move the page's `items` into `payload`. Each page's body is
 	/// freed before its payload is built, so the two are never alive together.
 	template <typename Payload, typename Item, typename Build>
-	[[nodiscard]] Result<Payload> paged_into(const LayerQuery& query, Payload payload,
-											 std::vector<Item> Payload::*items,
+	[[nodiscard]] Result<Payload> paged_into(const LayerQuery& query, CallBudget& budget,
+											 Payload payload, std::vector<Item> Payload::*items,
 											 const Build& build) const {
-		Result<void> done = paged(query, [&](std::string& body, const Json& root) -> Result<void> {
-			release(body);
-			Result<Payload> page = parsed([&] { return build(root); });
-			if (!page) {
-				return std::unexpected(std::move(page.error()));
-			}
-			std::vector<Item>& target = payload.*items;
-			std::vector<Item>& source = (*page).*items;
-			if (target.empty()) {
-				target = std::move(source);
-			} else {
-				target.insert(target.end(), std::make_move_iterator(source.begin()),
-							  std::make_move_iterator(source.end()));
-			}
-			return {};
-		});
+		Result<void> done =
+			paged(query, budget, [&](std::string& body, const Json& root) -> Result<void> {
+				release(body);
+				Result<Payload> page = parsed([&] { return build(root); });
+				if (!page) {
+					return std::unexpected(std::move(page.error()));
+				}
+				std::vector<Item>& target = payload.*items;
+				std::vector<Item>& source = (*page).*items;
+				if (target.empty()) {
+					target = std::move(source);
+				} else {
+					target.insert(target.end(), std::make_move_iterator(source.begin()),
+								  std::make_move_iterator(source.end()));
+				}
+				return {};
+			});
 		if (!done) {
 			return std::unexpected(std::move(done.error()));
 		}
@@ -466,7 +543,7 @@ ArcGISClient::~ArcGISClient() = default;
 ArcGISClient::ArcGISClient(ArcGISClient&&) noexcept = default;
 ArcGISClient& ArcGISClient::operator=(ArcGISClient&&) noexcept = default;
 
-Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t day) const {
+Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t day) const try {
 	const LayerDescriptor* descriptor = find_layer(LayerProduct::Categorical, day, "");
 	if (descriptor == nullptr) {
 		return std::unexpected(
@@ -474,15 +551,18 @@ Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t d
 	}
 	CategoricalOutlookPayload seed;
 	seed.day_offset = day;
+	CallBudget budget = impl_->call_budget();
 	// GeoJSON, the shape the spc-data categorical parser reads.
 	return impl_->paged_into(
-		product_layer(kArcGisOutlooks, descriptor->id, "geojson"), std::move(seed),
+		product_layer(kArcGisOutlooks, descriptor->id, "geojson"), budget, std::move(seed),
 		&CategoricalOutlookPayload::features,
 		[day](const Json& root) { return detail::categorical_from_tree(root, day); });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
-															 std::string_view hazard) const {
+															 std::string_view hazard) const try {
 	const std::string_view normalized = normalized_hazard(day, hazard);
 	const LayerDescriptor* descriptor = day1_3_probability_layer(day, normalized);
 	if (descriptor == nullptr) {
@@ -491,15 +571,18 @@ Result<ProbOutlookPayload> ArcGISClient::query_probabilistic(std::int32_t day,
 	ProbOutlookPayload seed;
 	seed.day_offset = day;
 	seed.hazard = normalized;
-	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"),
+	CallBudget budget = impl_->call_budget();
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id, "geojson"), budget,
 							 std::move(seed), &ProbOutlookPayload::features,
 							 [day, normalized](const Json& root) {
 								 return detail::probabilistic_from_tree(root, day, normalized);
 							 });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 Result<ConditionalIntensityPayload>
-ArcGISClient::query_conditional_intensity(std::int32_t day, std::string_view hazard) const {
+ArcGISClient::query_conditional_intensity(std::int32_t day, std::string_view hazard) const try {
 	const std::string_view normalized = normalized_hazard(day, hazard);
 	const LayerDescriptor* descriptor =
 		find_layer(LayerProduct::ConditionalIntensity, day, normalized);
@@ -511,14 +594,19 @@ ArcGISClient::query_conditional_intensity(std::int32_t day, std::string_view haz
 	ConditionalIntensityPayload seed;
 	seed.day = day;
 	seed.hazard = normalized;
-	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
-							 &ConditionalIntensityPayload::features,
-							 [day, hazard = std::string{normalized}](const Json& root) {
-								 return detail::conditional_intensity_from_tree(root, day, hazard);
+	CallBudget budget = impl_->call_budget();
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), budget,
+							 std::move(seed), &ConditionalIntensityPayload::features,
+							 [day, hazard = std::string{normalized},
+							  projection = &budget.projection()](const Json& root) {
+								 return detail::conditional_intensity_from_tree(root, day, hazard,
+																				projection);
 							 });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
-Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) const {
+Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) const try {
 	const LayerDescriptor* descriptor = find_layer(LayerProduct::Probability, day, "severe");
 	if (descriptor == nullptr || day < 4) {
 		return std::unexpected(
@@ -526,13 +614,17 @@ Result<Day48OutlookPayload> ArcGISClient::query_day4_8(std::int32_t day) const {
 	}
 	Day48OutlookPayload seed;
 	seed.day = day;
-	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), std::move(seed),
-							 &Day48OutlookPayload::features, [day](const Json& root) {
-								 return detail::day4_8_from_tree(root, day);
+	CallBudget budget = impl_->call_budget();
+	return impl_->paged_into(product_layer(kArcGisOutlooks, descriptor->id), budget,
+							 std::move(seed), &Day48OutlookPayload::features,
+							 [day, projection = &budget.projection()](const Json& root) {
+								 return detail::day4_8_from_tree(root, day, projection);
 							 });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
-Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) const {
+Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) const try {
 	const std::vector<const LayerDescriptor*> layers = fire_weather_layers(day);
 	if (layers.empty()) {
 		return std::unexpected(
@@ -540,33 +632,42 @@ Result<FireWeatherPayload> ArcGISClient::query_fire_weather(std::int32_t day) co
 	}
 	FireWeatherPayload payload;
 	payload.day = day;
+	// One budget for both layers: together they are the payload.
+	CallBudget budget = impl_->call_budget();
 	for (const LayerDescriptor* descriptor : layers) {
 		const FireWeatherLayer layer = fire_weather_layer(descriptor->subtype);
 		LayerQuery query = product_layer(kArcGisFireWeather, descriptor->id);
 		// These layers default to Web Mercator; ask for lon/lat.
 		query.out_spatial_reference = "4326";
-		Result<FireWeatherPayload> merged =
-			impl_->paged_into(query, std::move(payload), &FireWeatherPayload::features,
-							  [day, layer](const Json& root) {
-								  return detail::fire_weather_from_tree(root, day, layer);
-							  });
+		Result<FireWeatherPayload> merged = impl_->paged_into(
+			query, budget, std::move(payload), &FireWeatherPayload::features,
+			[day, layer, projection = &budget.projection()](const Json& root) {
+				return detail::fire_weather_from_tree(root, day, layer, projection);
+			});
 		if (!merged) {
 			return merged;
 		}
 		payload = std::move(*merged);
 	}
 	return payload;
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
-Result<MesoscalePayload> ArcGISClient::query_active_md() const {
-	return impl_->paged_into(product_layer(kArcGisMesoscale, 0), MesoscalePayload{},
+Result<MesoscalePayload> ArcGISClient::query_active_md() const try {
+	CallBudget budget = impl_->call_budget();
+	return impl_->paged_into(product_layer(kArcGisMesoscale, 0), budget, MesoscalePayload{},
 							 &MesoscalePayload::discussions,
-							 [](const Json& root) { return detail::mesoscale_from_tree(root); });
+							 [projection = &budget.projection()](const Json& root) {
+								 return detail::mesoscale_from_tree(root, projection);
+							 });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 Result<std::vector<std::string>> ArcGISClient::query_layer(ArcGISService service,
 														   std::int32_t layer_id,
-														   const QueryParams& params) const {
+														   const QueryParams& params) const try {
 	if (layer_id < 0) {
 		return std::unexpected(Error::invalid_request("ArcGIS layer id must be non-negative"));
 	}
@@ -585,9 +686,11 @@ Result<std::vector<std::string>> ArcGISClient::query_layer(ArcGISService service
 			base = kArcGisMesoscale;
 			break;
 	}
+	// The budget's byte limit bounds what `pages` retains.
+	CallBudget budget = impl_->call_budget();
 	std::vector<std::string> pages;
 	Result<void> done =
-		impl_->paged(LayerQuery{base, layer_id, params, {}},
+		impl_->paged(LayerQuery{base, layer_id, params, {}}, budget,
 					 [&pages](std::string& body, const Json& /*root*/) -> Result<void> {
 						 pages.push_back(std::move(body));
 						 return {};
@@ -596,6 +699,8 @@ Result<std::vector<std::string>> ArcGISClient::query_layer(ArcGISService service
 		return std::unexpected(std::move(done.error()));
 	}
 	return pages;
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 // ===================== ArchiveClient =====================
@@ -652,20 +757,22 @@ ArchiveClient::~ArchiveClient() = default;
 ArchiveClient::ArchiveClient(ArchiveClient&&) noexcept = default;
 ArchiveClient& ArchiveClient::operator=(ArchiveClient&&) noexcept = default;
 
-Result<WatchPayload> ArchiveClient::watches(std::string_view timestamp) const {
+Result<WatchPayload> ArchiveClient::watches(std::string_view timestamp) const try {
 	std::string url = std::format("{}json/spcwatch.py", kIemBase);
 	if (!timestamp.empty()) {
 		url += "?ts=" + percent_encode(timestamp);
 	}
 	return built_from(impl_->fetch(url),
 					  [](const Json& root) { return detail::watches_from_tree(root); });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 // A start/end pair cannot be told apart by type.
 // NOLINTBEGIN(bugprone-easily-swappable-parameters)
 Result<StormReportPayload> ArchiveClient::storm_reports(std::string_view start_iso,
 														std::string_view end_iso,
-														std::string_view wfo) const {
+														std::string_view wfo) const try {
 	// NOLINTEND(bugprone-easily-swappable-parameters)
 	// Encode every value: an ISO offset's '+' would otherwise decode as a space.
 	std::string url = std::format("{}geojson/lsr.geojson?sts={}&ets={}", kIemBase,
@@ -676,6 +783,8 @@ Result<StormReportPayload> ArchiveClient::storm_reports(std::string_view start_i
 	}
 	return built_from(impl_->fetch(url),
 					  [](const Json& root) { return detail::storm_reports_from_tree(root); });
+} catch (const std::exception&) {
+	return std::unexpected(current_failure());
 }
 
 } // namespace spc

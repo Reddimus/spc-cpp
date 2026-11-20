@@ -13,6 +13,9 @@ namespace spc {
 /// `exceededTransferLimit` when more remain. The server may also return fewer
 /// records than `resultRecordCount`, so `advance()` moves the offset by the
 /// number actually returned. SPC layers rarely need a second page.
+///
+/// `max_pages` bounds the pages, not the memory they fill: `ArcGISClient`
+/// separately caps the bytes and projected points of a whole call.
 class ArcGISPager {
 public:
 	/// `page_size` is the `resultRecordCount` sent with each request.
