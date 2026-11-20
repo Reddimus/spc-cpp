@@ -77,6 +77,9 @@ detail::conditional_intensity_from_tree(const Json& root, std::int32_t day, std:
 		}
 		ConditionalIntensityFeature f;
 		f.label = detail::first_string(*props, {"LABEL", "label"});
+		if (f.label.empty()) {
+			continue;
+		}
 		f.cig_level = cig_severity_from_label(f.label);
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});
 		f.valid_from = detail::first_timestamp(*props, {"VALID", "valid"});

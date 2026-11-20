@@ -20,6 +20,11 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Cap a `Retry-After` too large for int64 at the longest wait instead of ignoring it.
 - Reset the daily quota when the clock steps back across midnight.
 - Initialize `HttpResponse::status_code` to 0.
+- Skip features whose fields are not an object, conditional-intensity polygons
+  without a label, and day 1-2 fire-weather polygons with no known `dn` band.
+- Read the numeric strings `"nan"` and `"inf"` as 0 instead of passing them on.
+- Fall back to `wkid` when `latestWkid` is null or not a number, and ignore a null
+  geometry `spatialReference`.
 
 ## [0.4.7] - 2026-11-04
 

@@ -100,6 +100,9 @@ FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t
 			f.probability = detail::normalized_probability(*props);
 		} else if (f.label.empty()) {
 			f.label = label_from_dn(*props, layer);
+			if (f.label.empty()) {
+				continue; // no label and no known dn band
+			}
 		}
 		f.severity = fire_severity_from_label(f.label);
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});

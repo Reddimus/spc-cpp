@@ -25,15 +25,19 @@ Pairs captured as Esri JSON (`.esri.json`, `f=json`) and GeoJSON (`.geojson`,
 Single captures:
 
 - `arcgis_day1_torn_conditional_intensity.esri.json`: `label` `"CIG1"`.
-- `arcgis_day4_8_nonempty.synthetic.json`: a non-empty Day 4 response.
-- `arcgis_day{1,2}_fire_weather.esri.json`: fire weather, with only a numeric
-  `dn` and no label.
+- `arcgis_day{1,2}_fire_weather.esri.json`: fire weather in the layer's native
+  Web Mercator (wkid 102100), with only a numeric `dn`, no label, and no
+  `issue`. The client asks for `outSR=4326` instead; these test the conversion.
 - `arcgis_mesoscale_discussion.esri.json`: one active discussion.
 - `arcgis_mesoscale_discussion_noarea.esri.json`: the `NoArea` placeholder the
   layer returns when no discussion is active (captured 2026-09-25).
 - `arcgis_layers_2026-09-03.json`: layer ids, names, and parents of the three
   MapServers. `python3 tools/verify_arcgis_metadata.py` compares it with the
   live services.
+
+Synthetic:
+
+- `arcgis_day4_8_nonempty.synthetic.json`: a non-empty Day 4 response.
 
 ## IEM (`mesonet.agron.iastate.edu`)
 

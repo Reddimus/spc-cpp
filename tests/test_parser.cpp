@@ -2,9 +2,15 @@
 /// @brief Day 1-3 parser behavior shared with spc-data. The assertions match
 /// spc-data's own parser tests.
 
+#include "spc/models/convective.hpp"
+#include "spc/models/fire_weather.hpp"
 #include "spc/models/outlook.hpp"
+#include "spc/models/storm_report.hpp"
+#include "spc/models/watch.hpp"
 
+#include <cmath>
 #include <gtest/gtest.h>
+#include <string>
 
 namespace {
 
@@ -116,6 +122,64 @@ TEST(Parser, UnknownLabelSkipped) {
 	})",
 														  1);
 	EXPECT_TRUE(p.features.empty());
+}
+
+// A ring inside a feature whose fields are replaced per case.
+std::string esri_feature(std::string_view fields) {
+	return R"({"features":[{"attributes":)" + std::string{fields} +
+		   R"(,"geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}}]})";
+}
+
+TEST(Parser, ConditionalIntensitySkipsFeaturesWithoutALabel) {
+	for (const char* fields : {"null", "42", "{}", R"({"dn":null})"}) {
+		EXPECT_TRUE(
+			parse_conditional_intensity(esri_feature(fields), 1, "tornado").features.empty())
+			<< fields;
+	}
+	EXPECT_EQ(parse_conditional_intensity(esri_feature(R"({"label":"CIG1"})"), 1, "tornado")
+				  .features.size(),
+			  1u);
+}
+
+TEST(Parser, FireWeatherSkipsDay1And2FeaturesWithNoBand) {
+	for (const char* fields : {"null", "42", "{}", R"({"dn":null})", R"({"dn":6})"}) {
+		EXPECT_TRUE(
+			parse_fire_weather(esri_feature(fields), 1, FireWeatherLayer::Outlook).features.empty())
+			<< fields;
+	}
+	const FireWeatherPayload kept =
+		parse_fire_weather(esri_feature(R"({"dn":8})"), 1, FireWeatherLayer::Outlook);
+	ASSERT_EQ(kept.features.size(), 1u);
+	EXPECT_EQ(kept.features[0].label, "CRIT");
+}
+
+TEST(Parser, NonFiniteNumericStringsReadAsZero) {
+	const StormReportPayload reports = parse_storm_reports(
+		R"({"features":[{"properties":{"magnitude":"nan","lon":"inf","lat":"-inf"},"geometry":null}]})");
+	ASSERT_EQ(reports.reports.size(), 1u);
+	EXPECT_EQ(reports.reports[0].magnitude, 0.0);
+	EXPECT_TRUE(std::isfinite(reports.reports[0].location.lon));
+	EXPECT_TRUE(std::isfinite(reports.reports[0].location.lat));
+
+	const WatchPayload watches = parse_watches(
+		R"({"features":[{"properties":{"max_hail_size":"inf","max_wind_gust_knots":"nan"},"geometry":null}]})");
+	ASSERT_EQ(watches.watches.size(), 1u);
+	EXPECT_EQ(watches.watches[0].max_hail_size, 0.0);
+	EXPECT_EQ(watches.watches[0].max_wind_gust_knots, 0.0);
+}
+
+TEST(Parser, ANullOrNonNumericLatestWkidFallsBackToWkid) {
+	const std::string ring = R"("geometry":{"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]})";
+	for (const char* reference :
+		 {R"({"wkid":4326,"latestWkid":null})", R"({"wkid":4326,"latestWkid":"4326"})"}) {
+		const std::string body = std::string{R"({"spatialReference":)"} + reference +
+								 R"(,"features":[{"attributes":{"label":"CIG1"},)" + ring + "}]}";
+		EXPECT_EQ(parse_conditional_intensity(body, 1, "tornado").features.size(), 1u) << reference;
+	}
+	// A geometry's null reference leaves the payload's in force.
+	const std::string body =
+		R"({"spatialReference":{"wkid":4326},"features":[{"attributes":{"label":"CIG1"},"geometry":{"spatialReference":null,"rings":[[[0,1],[1,1],[1,0],[0,0],[0,1]]]}}]})";
+	EXPECT_EQ(parse_conditional_intensity(body, 1, "tornado").features.size(), 1u);
 }
 
 } // namespace

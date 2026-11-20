@@ -358,7 +358,8 @@ TEST(Models, FireWeatherLayerIsTheOnlyThingThatDisambiguatesDayOneAndTwoDn) {
 			parse_fire_weather(body, day, FireWeatherLayer::DryThunderstorm);
 
 		ASSERT_EQ(outlook.features.size(), 3u) << name;
-		ASSERT_EQ(dry.features.size(), 3u) << name;
+		// dn 10 has no dry-thunderstorm band, so that polygon is skipped.
+		ASSERT_EQ(dry.features.size(), 2u) << name;
 		EXPECT_EQ(outlook.features[0].label, "ELEV") << name;
 		EXPECT_EQ(outlook.features[1].label, "CRIT") << name;
 		EXPECT_EQ(outlook.features[2].label, "EXTM") << name;

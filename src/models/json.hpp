@@ -38,11 +38,12 @@ struct ParsedNumber {
 
 /// Parse the leading decimal number of `text` regardless of the process
 /// locale. `std::stod` follows LC_NUMERIC, so on a comma-decimal host it reads
-/// "0.15" as 0. Leading whitespace and '+' are rejected.
+/// "0.15" as 0. Leading whitespace and '+' are rejected; "nan" and "inf" parse,
+/// as with std::from_chars.
 ParsedNumber parse_double(std::string_view text);
 
 /// `obj[key]` as a number, accepting numeric strings such as "5" or "0.15".
-/// Missing or non-numeric values yield 0.
+/// Missing, non-numeric, and non-finite values yield 0.
 double json_number_or_numeric_string(const Json& obj, const char* key);
 
 /// The LABEL/label/dn probability normalized to [0, 1]. Values above 1 are
@@ -83,7 +84,8 @@ glz::expected<Json, std::string> parse_owned_root(const std::string& body);
 /// public `parse_*` contract.
 Json parse_root_or_throw(std::string_view body);
 
-/// A feature's fields: GeoJSON `properties` or Esri `attributes`.
+/// A feature's fields: GeoJSON `properties` or Esri `attributes`, or null
+/// when they are missing or not an object.
 const Json* feature_fields(const Json& feature);
 
 /// One per payload: shares the collection reference and projection budget

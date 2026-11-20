@@ -21,7 +21,7 @@ MesoscalePayload detail::mesoscale_from_tree(const Json& root) {
 	detail::PayloadGeometryParser geometry_parser(root);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
-		if (props == nullptr || !props->is_object()) {
+		if (props == nullptr) {
 			continue;
 		}
 		MesoscaleDiscussion md;
