@@ -32,7 +32,8 @@ RateLimiter::RateLimiter(Config config)
 
 void RateLimiter::check_daily_reset() noexcept {
 	const std::chrono::system_clock::time_point today = utc_day_start();
-	if (today > day_start_) {
+	// Not `>`: a clock stepped back across midnight must not freeze the quota.
+	if (today != day_start_) {
 		daily_requests_used_ = 0;
 		day_start_ = today;
 	}
@@ -148,7 +149,7 @@ std::int32_t RateLimiter::daily_requests_remaining() const noexcept {
 		return 0;
 	}
 	// A new UTC day resets the count even before the next acquire.
-	if (utc_day_start() > day_start_) {
+	if (utc_day_start() != day_start_) {
 		return config_.daily_limit;
 	}
 	return config_.daily_limit - daily_requests_used_;

@@ -30,8 +30,9 @@ public:
 	[[nodiscard]] bool try_acquire() noexcept;
 
 	/// Wait for a token, up to `Config::max_wait` if set. Returns false when
-	/// no token can arrive in time or the daily quota is spent; it does not
-	/// sleep when waiting cannot help.
+	/// no token can arrive in time or the daily quota is spent. A lone caller
+	/// returns at once when waiting cannot help; with several waiters, one may
+	/// wait and still get nothing.
 	[[nodiscard]] bool acquire();
 
 	/// `acquire()` with an explicit limit on the wait.

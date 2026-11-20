@@ -10,6 +10,7 @@
 #include "spc/models/outlook.hpp"
 #include "support/fixtures.hpp"
 
+#include <algorithm>
 #include <clocale>
 #include <cmath>
 #include <cstddef>
@@ -118,14 +119,22 @@ TEST(LocaleIndependence, ProbabilisticOutlookKeepsItsIsoplethsUnderACommaDecimal
 		GTEST_SKIP() << "de_DE.UTF-8 is not installed on this host";
 	}
 
-	const ProbOutlookPayload payload =
-		parse_probabilistic(read_fixture("arcgis_day1_prob_tornado.geojson"), 1, "tornado");
-
-	ASSERT_GT(payload.features.size(), 0u);
-	for (const ProbOutlookFeature& f : payload.features) {
-		EXPECT_GE(f.probability, 0.01);
-		EXPECT_LE(f.probability, 1.0);
+	// Each feature's dn repeats its label, so drop dn: only the "0.02"-style
+	// labels can then supply the probabilities.
+	std::string body = read_fixture("arcgis_day1_prob_tornado.geojson");
+	for (std::size_t at = body.find("\"dn\""); at != std::string::npos;
+		 at = body.find("\"dn\"", at)) {
+		body.replace(at, 4, "\"xx\"");
 	}
+	const ProbOutlookPayload payload = parse_probabilistic(body, 1, "tornado");
+
+	ASSERT_EQ(payload.features.size(), 4u);
+	std::vector<double> probabilities;
+	for (const ProbOutlookFeature& f : payload.features) {
+		probabilities.push_back(f.probability);
+	}
+	std::ranges::sort(probabilities);
+	EXPECT_EQ(probabilities, (std::vector<double>{0.02, 0.05, 0.10, 0.15}));
 }
 
 TEST(LocaleIndependence, FireWeatherNoRiskSentinelIsStillDroppedUnderACommaDecimalLocale) {

@@ -5,6 +5,9 @@
 /// client that parsed a response once builds its payload from that tree. The
 /// names are distinct because glz::generic converts implicitly from
 /// std::string, which would make overloads of `parse_*` ambiguous.
+///
+/// The parsers that project Esri rings take the payload's `ProjectionBudget`
+/// when `root` is only part of it, such as one page of a paged query.
 
 #pragma once
 
@@ -27,15 +30,18 @@ CategoricalOutlookPayload categorical_from_tree(const Json& root, std::int32_t d
 ProbOutlookPayload probabilistic_from_tree(const Json& root, std::int32_t day_offset,
 										   std::string_view hazard);
 
-Day48OutlookPayload day4_8_from_tree(const Json& root, std::int32_t day);
+Day48OutlookPayload day4_8_from_tree(const Json& root, std::int32_t day,
+									 ProjectionBudget* budget = nullptr);
 
 ConditionalIntensityPayload conditional_intensity_from_tree(const Json& root, std::int32_t day,
-															std::string hazard);
+															std::string hazard,
+															ProjectionBudget* budget = nullptr);
 
 FireWeatherPayload fire_weather_from_tree(const Json& root, std::int32_t day,
-										  FireWeatherLayer layer);
+										  FireWeatherLayer layer,
+										  ProjectionBudget* budget = nullptr);
 
-MesoscalePayload mesoscale_from_tree(const Json& root);
+MesoscalePayload mesoscale_from_tree(const Json& root, ProjectionBudget* budget = nullptr);
 
 StormReportPayload storm_reports_from_tree(const Json& root);
 

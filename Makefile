@@ -4,6 +4,9 @@ BUILD_DIR := build
 CMAKE := cmake
 NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 SOURCES = find src include tests examples benchmarks \( -name '*.cpp' -o -name '*.hpp' \) -print0
+# The version bundled by the markdownlint-cli2-action pin in ci.yml, so local
+# and CI lint agree. Change both together.
+MARKDOWNLINT := npx --yes markdownlint-cli2@0.24.0
 
 .PHONY: all build debug configure configure-debug test test-consumers fixtures-check lint \
 	lint-md format format-md tidy bench coverage pre-commit install-hooks clean help
@@ -39,14 +42,14 @@ lint:
 	@python3 tools/test_cpp_auto_audit.py
 
 lint-md:
-	npx markdownlint-cli2 "**/*.md"
+	$(MARKDOWNLINT) "**/*.md"
 
 format:
 	@command -v clang-format >/dev/null || { echo "clang-format is not installed"; exit 1; }
 	@$(SOURCES) | xargs -0 clang-format -i
 
 format-md:
-	npx markdownlint-cli2 --fix "**/*.md"
+	$(MARKDOWNLINT) --fix "**/*.md"
 
 # Compile the libraries with clang-tidy. On macOS, see CONTRIBUTING.md.
 tidy:

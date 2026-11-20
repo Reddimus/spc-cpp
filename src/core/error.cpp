@@ -1,5 +1,6 @@
 #include "spc/error.hpp"
 
+#include <cstddef>
 #include <format>
 #include <glaze/glaze.hpp>
 #include <glaze/json/generic.hpp>
@@ -9,12 +10,16 @@ namespace spc {
 
 namespace {
 
+/// Error bodies are small; a bigger one is not parsed, so an error never
+/// holds a JSON tree several times the size of a body as large as the limit.
+constexpr std::size_t kMaxParsedErrorBody = std::size_t{64} * 1024;
+
 /// Use the ArcGIS error message when the body is JSON; otherwise keep the start
 /// of the raw body, such as SPC's HTML 404 page.
 void fill_message_from_body(Error& err, const std::string& body) {
 	glz::generic root{};
-	const glz::error_ctx ec = glz::read_json(root, body);
-	if (!ec && root.is_object()) {
+	const bool parsed = body.size() <= kMaxParsedErrorBody && !glz::read_json(root, body);
+	if (parsed && root.is_object()) {
 		const glz::generic::object_t& obj = root.get_object();
 		glz::generic::object_t::const_iterator it = obj.find("error");
 		if (it != obj.end() && it->second.is_object()) {
@@ -53,7 +58,7 @@ Error Error::from_response(int status, const std::string& body, Feed404 semantic
 		err.code = ErrorCode::InvalidRequest;
 	} else if (status == 429 || status == 503) {
 		err.code = ErrorCode::RateLimited;
-	} else if (status >= 500) {
+	} else if (status >= 500 && status <= 599) {
 		err.code = ErrorCode::ServerError;
 	} else {
 		err.code = ErrorCode::Unknown;

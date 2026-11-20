@@ -20,7 +20,6 @@ struct JsonReadOptions : glz::opts {
 
 constexpr double kMercatorRadius = 6378137.0;
 constexpr double kDegrees = 180.0 / std::numbers::pi;
-constexpr std::size_t kMaxAddedProjectionPoints = 1000000;
 
 void validate_mercator(const Polygon& ring) {
 	for (const LonLat point : ring) {
@@ -126,9 +125,10 @@ double json_number_or_numeric_string(const Json& obj, const char* key) {
 		return v->get<double>();
 	}
 	if (v->is_string()) {
-		// Matches a C-locale std::stod for every value SPC publishes.
+		// Matches a C-locale std::stod for every value SPC publishes. No field
+		// means "nan" or "inf", so those read as 0 too.
 		const ParsedNumber parsed = parse_double(v->get<std::string>());
-		return parsed.ok ? parsed.value : 0.0;
+		return parsed.ok && std::isfinite(parsed.value) ? parsed.value : 0.0;
 	}
 	return 0.0;
 }
@@ -234,13 +234,14 @@ std::vector<Polygon> parse_esri_rings_with_budget(const Json& geom, const Json* 
 	if (rings_node == nullptr || !rings_node->is_array()) {
 		return out;
 	}
-	if (const Json* local = lookup(geom, "spatialReference")) {
+	if (const Json* local = lookup(geom, "spatialReference");
+		local != nullptr && local->is_object()) {
 		reference = local;
 	}
 	bool mercator = false;
-	if (reference != nullptr) {
+	if (reference != nullptr && reference->is_object()) {
 		const Json* id = lookup(*reference, "latestWkid");
-		if (id == nullptr) {
+		if (id == nullptr || !id->is_number()) {
 			id = lookup(*reference, "wkid");
 		}
 		const double wkid = id != nullptr && id->is_number() ? id->get<double>() : 0.0;
@@ -298,8 +299,8 @@ std::vector<Polygon> parse_esri_rings_with_budget(const Json& geom, const Json* 
 } // namespace
 
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference) {
-	std::size_t remaining = kMaxAddedProjectionPoints;
-	return parse_esri_rings_with_budget(geom, reference, remaining);
+	ProjectionBudget budget;
+	return parse_esri_rings_with_budget(geom, reference, budget.remaining_added_points);
 }
 
 glz::expected<Json, std::string> parse_root(std::string_view body) {
@@ -348,17 +349,19 @@ Json parse_root_or_throw(std::string_view body) {
 }
 
 const Json* feature_fields(const Json& feature) {
-	const Json* properties = lookup(feature, "properties");
-	return properties != nullptr ? properties : lookup(feature, "attributes");
+	const Json* fields = lookup(feature, "properties");
+	if (fields == nullptr) {
+		fields = lookup(feature, "attributes");
+	}
+	return fields != nullptr && fields->is_object() ? fields : nullptr;
 }
 
-PayloadGeometryParser::PayloadGeometryParser(const Json& root)
-	: reference_(lookup(root, "spatialReference")),
-	  remaining_added_points_(kMaxAddedProjectionPoints) {}
+PayloadGeometryParser::PayloadGeometryParser(const Json& root, ProjectionBudget* shared)
+	: reference_(lookup(root, "spatialReference")), budget_(shared != nullptr ? shared : &own_) {}
 
 std::vector<Polygon> PayloadGeometryParser::parse(const Json& geometry) {
 	return lookup(geometry, "rings") != nullptr
-			   ? parse_esri_rings_with_budget(geometry, reference_, remaining_added_points_)
+			   ? parse_esri_rings_with_budget(geometry, reference_, budget_->remaining_added_points)
 			   : parse_rings(geometry);
 }
 

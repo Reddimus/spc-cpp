@@ -38,11 +38,12 @@ struct ParsedNumber {
 
 /// Parse the leading decimal number of `text` regardless of the process
 /// locale. `std::stod` follows LC_NUMERIC, so on a comma-decimal host it reads
-/// "0.15" as 0. Leading whitespace and '+' are rejected.
+/// "0.15" as 0. Leading whitespace and '+' are rejected; "nan" and "inf" parse,
+/// as with std::from_chars.
 ParsedNumber parse_double(std::string_view text);
 
 /// `obj[key]` as a number, accepting numeric strings such as "5" or "0.15".
-/// Missing or non-numeric values yield 0.
+/// Missing, non-numeric, and non-finite values yield 0.
 double json_number_or_numeric_string(const Json& obj, const char* key);
 
 /// The LABEL/label/dn probability normalized to [0, 1]. Values above 1 are
@@ -62,8 +63,8 @@ std::vector<Polygon> parse_rings(const Json& geom);
 /// rings (clockwise) and holes (counter-clockwise) in one list; the holes are
 /// dropped so the result matches `parse_rings` for the same layer. Web Mercator
 /// is converted to degrees with at most one metre of boundary error. A geometry
-/// needing over one million added points fails. A geometry reference overrides
-/// the response reference.
+/// needing more added points than its payload's `ProjectionBudget` has left
+/// fails. A geometry reference overrides the response reference.
 /// Malformed points fail for every supported spatial reference.
 std::vector<Polygon> parse_esri_rings(const Json& geom, const Json* reference = nullptr);
 
@@ -83,14 +84,25 @@ glz::expected<Json, std::string> parse_owned_root(const std::string& body);
 /// public `parse_*` contract.
 Json parse_root_or_throw(std::string_view body);
 
-/// A feature's fields: GeoJSON `properties` or Esri `attributes`.
+/// A feature's fields: GeoJSON `properties` or Esri `attributes`, or null
+/// when they are missing or not an object.
 const Json* feature_fields(const Json& feature);
 
-/// One per payload: shares the collection reference and projection budget
-/// across all features, accepting Esri rings or GeoJSON coordinates.
+/// The points Web Mercator projection may still add to one payload: one
+/// million, 16 MB, at the start. An edge is subdivided every 10 km, so 20
+/// bytes of JSON can add 4,000 points.
+struct ProjectionBudget {
+	std::size_t remaining_added_points{1000000};
+};
+
+/// One per response: shares the collection reference and projection budget
+/// across all features, accepting Esri rings or GeoJSON coordinates. The
+/// budget is the payload's. A caller that builds one payload from several
+/// responses passes the same `shared` budget for each; otherwise the response
+/// is the payload and the parser uses its own.
 class PayloadGeometryParser {
 public:
-	explicit PayloadGeometryParser(const Json& root);
+	explicit PayloadGeometryParser(const Json& root, ProjectionBudget* shared = nullptr);
 	~PayloadGeometryParser() = default;
 	PayloadGeometryParser(const PayloadGeometryParser&) = delete;
 	PayloadGeometryParser& operator=(const PayloadGeometryParser&) = delete;
@@ -100,7 +112,8 @@ public:
 
 private:
 	const Json* reference_;
-	std::size_t remaining_added_points_;
+	ProjectionBudget own_;
+	ProjectionBudget* budget_;
 };
 
 /// The first non-empty string among `keys`, e.g. {"LABEL", "label"}.

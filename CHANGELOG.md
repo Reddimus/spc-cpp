@@ -6,6 +6,52 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- An HTTPS request no longer follows a redirect to plain HTTP; it fails with
+  `InvalidRequest`.
+- A one-slash URL such as `https:/host/x`, which libcurl fetches as absolute, is
+  no longer appended to `ClientConfig::base_url` and sent to that host instead.
+- Bound memory across all pages of an ArcGIS call. One Web Mercator expansion
+  budget covers the whole call, both fire-weather layers included, and the pages
+  together may not exceed `ClientConfig::max_response_bytes` (`InvalidRequest`).
+  Before, a paging server could make one call hold gigabytes.
+
+### Changed
+
+- libcurl 7.86 is the minimum. 7.85's `curl/header.h` lacks `extern "C"`, so the
+  library never linked against it.
+
+- Report a malformed URL or a scheme other than HTTP(S) as `InvalidRequest`, and a
+  redirect loop as `ServerError`. `with_retry` no longer repeats them.
+- Map only HTTP 500-599 to `ServerError`; a status above 599 is `Unknown`.
+- Retry ArcGIS 429 and 5xx errors sent in HTTP 200 bodies like the same HTTP
+  status, one page at a time.
+- An ArcGIS error without a usable code reports `http_status` 0 and
+  `arcgisCode=0` instead of a made-up 400.
+
+### Fixed
+
+- Apply `ClientConfig::max_response_bytes` to the final response's decoded body. A
+  redirect hop's `Content-Length`, or a compressed length over the limit, no longer
+  fails a request whose body fits.
+- Cap a `Retry-After` too large for int64 at the longest wait instead of ignoring it.
+- Reset the daily quota when the clock steps back across midnight.
+- Initialize `HttpResponse::status_code` to 0.
+- A `std::exception` inside any client call, `std::bad_alloc` included, returns
+  `ParseError` instead of escaping from ArcGIS calls.
+- Error bodies over 64 KiB are not parsed for their message; the message is the
+  start of the body.
+- Skip features whose fields are not an object, conditional-intensity polygons
+  without a label, and day 1-2 fire-weather polygons with no known `dn` band.
+- Read the numeric strings `"nan"` and `"inf"` as 0 instead of passing them on.
+- Fall back to `wkid` when `latestWkid` is null or not a number, and ignore a null
+  geometry `spatialReference`.
+- Link Glaze through its target, so a build that finds an installed Glaze
+  (`FETCHCONTENT_TRY_FIND_PACKAGE_MODE`) configures and installs, and MSVC gets the
+  options Glaze requires.
+- The benchmarks' allocation-counter self-check no longer fails on MSVC.
+
 ## [0.4.7] - 2026-11-04
 
 ### Fixed

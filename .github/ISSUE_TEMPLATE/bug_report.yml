@@ -2,6 +2,10 @@ name: Bug report
 description: A crash, a wrong result, or a build failure.
 labels: [bug]
 body:
+  - type: markdown
+    attributes:
+      value: |
+        Report security vulnerabilities through GitHub's private vulnerability reporting, as described in the [security policy](https://github.com/Reddimus/spc-cpp/security/policy), not here.
   - type: textarea
     id: what
     attributes:
@@ -31,7 +35,3 @@ body:
         - libcurl: 8.5.0
     validations:
       required: true
-  - type: markdown
-    attributes:
-      value: |
-        Report security vulnerabilities privately, as described in the [security policy](https://github.com/Reddimus/spc-cpp/security/policy).

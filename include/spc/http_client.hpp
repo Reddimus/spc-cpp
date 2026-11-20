@@ -20,7 +20,7 @@ namespace spc {
 /// An HTTP response. Any status code is a successful transfer; the clients
 /// decide what a non-200 status means.
 struct HttpResponse {
-	std::int16_t status_code;
+	std::int16_t status_code{0};
 	std::string body;
 	/// Headers of the final response, after redirects.
 	std::vector<std::pair<std::string, std::string>> headers;
@@ -36,15 +36,19 @@ struct ClientConfig {
 	/// supported libcurl versions. Invalid values fail before sending.
 	std::chrono::seconds timeout{15};
 	bool verify_ssl{true};
-	/// Largest response body accepted. Bodies are held in memory and parsed
-	/// whole, and an IEM date range can be arbitrarily large. A bigger
-	/// response fails with `ErrorCode::InvalidRequest` and is not retried.
+	/// Largest decoded body accepted from the final response; 0 means no
+	/// limit. Bodies are held in memory and parsed whole, and an IEM date
+	/// range can be arbitrarily large. A bigger response fails with
+	/// `ErrorCode::InvalidRequest` and is not retried. `ArcGISClient` applies
+	/// the same limit to the pages of one call together.
 	std::size_t max_response_bytes{64UL * 1024UL * 1024UL};
 };
 
 /// The GET interface the clients use. Implement it to supply your own
 /// network stack or canned test responses. One transport may be shared by
 /// several clients and threads, so `get` must be safe to call concurrently.
+/// Report failures as an `Error`: a std::exception thrown from `get` reaches
+/// the client's caller as `ErrorCode::ParseError`, and any other propagates.
 class HttpTransport {
 public:
 	virtual ~HttpTransport() = default;
@@ -60,7 +64,8 @@ protected:
 };
 
 /// libcurl-backed transport. Follows redirects, accepts compressed bodies,
-/// and speaks only http and https.
+/// and speaks only http and https. An https request follows only https
+/// redirects, so its response never arrives over plaintext.
 ///
 /// Thread-safe: concurrent `get` calls each use their own pooled libcurl
 /// handle, and handles are reused so connections stay open between requests.
@@ -76,7 +81,8 @@ public:
 
 	/// Absolute HTTP and HTTPS URLs use case-insensitive schemes and bypass
 	/// `config().base_url`; other inputs are appended to it. Transfers and
-	/// redirects permit only HTTP and HTTPS.
+	/// redirects permit only HTTP and HTTPS, and an HTTPS request refuses a
+	/// redirect to HTTP. A refused redirect is `ErrorCode::InvalidRequest`.
 	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
 	/// The settings this client was built with; defaults on a moved-from client.

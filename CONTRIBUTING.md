@@ -1,7 +1,8 @@
 # Contributing
 
-Thanks for helping. Report security problems privately through
-[SECURITY.md](SECURITY.md), not in a public issue.
+Thanks for helping. Report security problems through GitHub's private
+vulnerability reporting, as [SECURITY.md](SECURITY.md) describes, not in a
+public issue.
 
 ## Set up
 
@@ -90,12 +91,13 @@ make tidy CMAKE_ARGS="-DCMAKE_CXX_COMPILER=$llvm/bin/clang++ \
 ## Fixtures
 
 `tests/fixtures/` holds captured NOAA and IEM responses. After adding or
-changing one, update the checksums:
+changing one, update the checksums. Files in subdirectories are fixtures too;
+dotfiles are not:
 
 ```bash
-for f in $(ls tests/fixtures | grep -v -e README.md -e SHA256SUMS); do
-  shasum -a 256 "tests/fixtures/$f"
-done > tests/fixtures/SHA256SUMS
+find tests/fixtures -type f ! -path '*/.*' ! -path tests/fixtures/README.md \
+  ! -path tests/fixtures/SHA256SUMS -exec shasum -a 256 {} + |
+  LC_ALL=C sort -k 2 > tests/fixtures/SHA256SUMS
 make fixtures-check
 ```
 
@@ -161,6 +163,17 @@ with an error.
 3. The release workflow checks that the tag matches `version.hpp`, runs
    the tests and consumer checks, then publishes the release with the
    changelog section as its notes.
+
+## Security reports
+
+SECURITY.md and the issue templates send reporters to GitHub's private
+vulnerability reporting. It is a repository setting, and with it off reporters
+have no private channel. Keep it on (Settings, Advanced Security) and check it
+after changing repository settings:
+
+```bash
+gh api repos/Reddimus/spc-cpp/private-vulnerability-reporting   # {"enabled":true}
+```
 
 ## Repository tools
 

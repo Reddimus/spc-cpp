@@ -17,7 +17,8 @@ enum class ErrorCode {
 	NetworkError,
 	/// HTTP 429 or 503, or the SDK's own rate limit.
 	RateLimited,
-	/// HTTP 5xx other than 503, or an ArcGIS query that never finished paging.
+	/// HTTP 500-599 other than 503, a redirect loop, or an ArcGIS query that
+	/// never finished paging.
 	ServerError,
 	/// A URL or ArcGIS service that no longer exists: a bug to report. A bad
 	/// layer id is `InvalidRequest`.
@@ -27,12 +28,15 @@ enum class ErrorCode {
 	/// so treat it as "no data", not as a failure. Only `StaticFeedClient`
 	/// returns it.
 	FeedUnavailable,
-	/// The request cannot succeed as asked: an unsupported day or hazard,
-	/// HTTP 400, an ArcGIS error such as an invalid parameter, or a response
-	/// larger than `ClientConfig::max_response_bytes`.
+	/// The request cannot succeed as asked: an unsupported day or hazard, a
+	/// malformed URL or one that is not HTTP(S), a refused redirect (to another
+	/// scheme, or from HTTPS to HTTP), HTTP 400, an ArcGIS error such as an
+	/// invalid parameter, or a response, or the pages of one ArcGIS call
+	/// together, larger than `ClientConfig::max_response_bytes`.
 	InvalidRequest,
-	/// The body was not valid JSON. Valid JSON without the expected fields
-	/// parses to an empty result.
+	/// The response could not be turned into a result: invalid JSON, Esri
+	/// geometry that cannot be converted, or an allocation failure inside the
+	/// call. Valid JSON without the expected fields parses to an empty result.
 	ParseError,
 	Unknown
 };
@@ -76,9 +80,10 @@ struct Error {
 	ErrorCode code{ErrorCode::Unknown};
 	std::string message;
 	/// HTTP status, or 0. For an ArcGIS error (sent with HTTP 200) this is the
-	/// ArcGIS code when it lies in 100..599.
+	/// ArcGIS code when it lies in 100..599, and 0 otherwise.
 	int http_status{0};
 	/// Extra context, such as ArcGIS error details or "arcgisCode=1000".
+	/// "arcgisCode=0" means the error carried no usable code.
 	std::string detail;
 
 	[[nodiscard]] constexpr bool is_ok() const noexcept { return code == ErrorCode::Ok; }
@@ -125,7 +130,7 @@ struct Error {
 
 	/// An Error for an ArcGIS `{"error":{"code":...}}` body, which the
 	/// MapServer sends with HTTP 200. Code 404 (a retired service) is
-	/// `NotFound`.
+	/// `NotFound`. Pass 0 when the error has no usable code.
 	[[nodiscard]] static Error from_arcgis(int arcgis_code, const std::string& body);
 };
 

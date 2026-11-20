@@ -10,7 +10,7 @@ target_include_directories(spc_benchmarks PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${PROJECT_SOURCE_DIR}/tests
 )
-target_include_directories(spc_benchmarks SYSTEM PRIVATE ${glaze_SOURCE_DIR}/include)
+target_link_libraries(spc_benchmarks PRIVATE glaze::glaze)
 target_compile_definitions(spc_benchmarks PRIVATE
     SPC_FIXTURES_DIR="${PROJECT_SOURCE_DIR}/tests/fixtures"
 )

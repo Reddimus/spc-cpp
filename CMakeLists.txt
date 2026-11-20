@@ -99,8 +99,9 @@ if(SPC_ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif()
 
-# CURLOPT_PROTOCOLS_STR, which keeps the transport on http and https, needs 7.85.
-find_package(CURL 7.85 REQUIRED)
+# 7.85 added CURLOPT_PROTOCOLS_STR, which keeps the transport on http and https,
+# and 7.86 made curl/header.h's functions extern "C", so C++ can link them.
+find_package(CURL 7.86 REQUIRED)
 find_package(Threads REQUIRED)
 
 include(FetchContent)
@@ -114,15 +115,22 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(glaze)
+# Glaze's headers are system headers wherever it is linked, so its warnings
+# never reach -Werror or clang-tidy. An installed (imported) Glaze already is.
+get_target_property(SPC_GLAZE_TARGET glaze::glaze ALIASED_TARGET)
+if(SPC_GLAZE_TARGET)
+    set_property(TARGET ${SPC_GLAZE_TARGET} PROPERTY SYSTEM TRUE)
+endif()
 
 add_subdirectory(src)
 
+# The test and benchmark frameworks are pinned by commit, so a moved tag cannot
+# change what runs. GIT_SHALLOW does not work with a hash; both clones are small.
 if(SPC_BUILD_TESTS)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.18.0
-        GIT_SHALLOW TRUE
+        GIT_TAG 063de7e9578f82b369302001269680b4b1553359 # v1.18.0
     )
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
@@ -135,8 +143,7 @@ if(SPC_BUILD_BENCHMARKS)
     FetchContent_Declare(
         benchmark
         GIT_REPOSITORY https://github.com/google/benchmark.git
-        GIT_TAG v1.9.5
-        GIT_SHALLOW TRUE
+        GIT_TAG 192ef10025eb2c4cdd392bc502f0c852196baa48 # v1.9.5
         SYSTEM
         EXCLUDE_FROM_ALL
     )
@@ -162,12 +169,15 @@ if(SPC_INSTALL)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
     install(DIRECTORY include/spc DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    # The static libraries contain compiled Glaze code, so ship its license.
     install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp)
-    install(FILES ${glaze_SOURCE_DIR}/LICENSE
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp
-        RENAME glaze-LICENSE
-    )
+    # The static libraries contain compiled Glaze code, so ship its license.
+    # A packaged Glaze, found instead of fetched, ships its own.
+    if(glaze_SOURCE_DIR)
+        install(FILES ${glaze_SOURCE_DIR}/LICENSE
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp
+            RENAME glaze-LICENSE
+        )
+    endif()
 
     configure_package_config_file(
         ${PROJECT_SOURCE_DIR}/cmake/spcConfig.cmake.in

@@ -1,7 +1,7 @@
 /// @file test_corpus.cpp
-/// @brief The captured SPC fixtures through the Day 1-3 parsers. spc-data
-/// checks the same fixtures for identical output; this catches a regression
-/// here first.
+/// @brief The captured fixtures through every parser, including watches,
+/// storm reports, and discussions. spc-data checks the Day 1-3 fixtures for
+/// identical output; this catches a regression here first.
 
 #include "spc/models/mesoscale.hpp"
 #include "spc/models/outlook.hpp"

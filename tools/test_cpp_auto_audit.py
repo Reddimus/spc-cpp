@@ -132,6 +132,98 @@ class AutoAuditTests(unittest.TestCase):
                     result = self.audit()
                     self.assertEqual(result.returncode, 0, result.stderr)
 
+    def test_placeholder_forms_and_mid_line_declarations_require_types(self):
+        sources = [
+            "decltype(auto) value = compute();",
+            "static decltype(auto) value = compute();",
+            "std::integral auto value = 42;",
+            "const std::convertible_to<std::vector<int>> auto value = 42;",
+            "int a = 1; auto b = 2;",
+            "int f() { auto x = g(); return x; }",
+            "struct S { static constexpr auto value = 42; };",
+            "auto fn = [] { auto x = 1; return x; };",
+            "auto it = values.begin(); auto n = 5;",
+            "for (int i = 0; auto& value : values) {}",
+            "int* p = new auto(42);",
+            "int* p = new const auto{42};",
+            "int* p = new (buffer) auto(42);",
+        ]
+        for source in sources:
+            with self.subTest(source=source):
+                (self.root / "forms.cpp").write_text(source + "\n")
+                result = self.audit()
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("forms.cpp:1", result.stderr)
+
+    def test_iterator_call_must_be_the_whole_initializer(self):
+        declarations = [
+            "auto pos = text.find(',');",
+            'auto pos = text.find("ab");',
+            "auto pos = text.find(separator, 2);",
+            "auto pos = [&] { return text.find(','); }();",
+            "auto size = std::distance(v.begin(), v.end());",
+            "auto found = table.find(key) != table.end();",
+            "auto first = *values.begin();",
+            "auto value = lookup(values.begin());",
+            "auto next = values.begin() + 1;",
+            "auto value = values.begin()->second;",
+            "auto value = std::ranges::find(values, 42);",
+            "auto it(values.size());",
+            "auto value = values.begin()();",
+            "auto value =\n    lookup(values.begin());",
+        ]
+        for declaration in declarations:
+            with self.subTest(declaration=declaration):
+                (self.root / "iterator.cpp").write_text(declaration + "\n")
+                result = self.audit()
+                self.assertEqual(result.returncode, 1, result.stdout)
+                self.assertIn("iterator.cpp:1", result.stderr)
+
+    def test_whole_iterator_initializers_remain_allowed(self):
+        declarations = [
+            "auto it = m.find(k);",
+            "auto it = m.find(make_key(a, b));",
+            "auto it = (m.find(k));",
+            "auto it{values.begin()};",
+            "auto it(values.cend());",
+            "auto it = config.layers().find(id);",
+            "auto it = this->items_.lower_bound(key);",
+            "auto range = table.equal_range(key);",
+            "auto it = std::find(values.begin(), values.end(), 42);",
+            "auto it = std::next(values.begin(), 2);",
+            "auto it = std::max_element(values.begin(), values.end());",
+            "auto a = values.begin(), b = values.end();",
+            "for (auto it = values.begin(); it != values.end(); ++it) {}",
+            "if (auto it = m.find(k); it != m.end()) {}",
+            "auto it = m.find(k); auto other = m.find(j);",
+            "auto it =\n    m.upper_bound(k);",
+        ]
+        for declaration in declarations:
+            with self.subTest(declaration=declaration):
+                (self.root / "iterator.cpp").write_text(declaration + "\n")
+                result = self.audit()
+                self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_parameters_bindings_and_lambdas_remain_allowed(self):
+        sources = [
+            "for (auto& [k, v] : m) {}",
+            "auto f = [](int x) { return x; };",
+            "const auto& [a, b] = pair;",
+            "int f() { auto [a, b] = pair; return a; }",
+            "auto f = [](auto x, const auto& y) { return x + y; };",
+            "auto f = [](std::integral auto x) { return x; };",
+            "auto f = []() -> decltype(auto) { return 42; };",
+            "auto f = []() -> const auto& { return value; };",
+            "void g(std::integral auto value, auto&& other);",
+            "template <auto N> int h();",
+            "template <typename T, std::integral auto N> int h();",
+        ]
+        for source in sources:
+            with self.subTest(source=source):
+                (self.root / "allowed.cpp").write_text(source + "\n")
+                result = self.audit()
+                self.assertEqual(result.returncode, 0, result.stderr)
+
     def test_structured_binding_declarations_remain_allowed(self):
         declarations = [
             "auto [a, b] = pair;",

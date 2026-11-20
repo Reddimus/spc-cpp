@@ -39,8 +39,8 @@ struct FireWeatherPayload {
 /// ELEV 1, CRIT 2, EXTM 3. Dry-thunderstorm labels and anything else map to 0.
 [[nodiscard]] std::uint8_t fire_severity_from_label(std::string_view label) noexcept;
 
-/// Parse one fire-weather layer (Esri or GeoJSON). No-risk polygons are
-/// skipped.
+/// Parse one fire-weather layer (Esri or GeoJSON). No-risk polygons, and
+/// day 1-2 polygons with neither a label nor a known `dn` band, are skipped.
 ///
 /// `layer` is required because days 1 and 2 carry only a numeric `dn` band,
 /// and the outlook (5 ELEV, 8 CRIT, 10 EXTM) and dry-thunderstorm (5 IDRT,

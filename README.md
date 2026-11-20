@@ -38,7 +38,7 @@ int main() {
 - CMake 3.31 or newer. Ubuntu 24.04 ships 3.28, so run
   `sudo snap install cmake --classic`.
 - GCC 13+, Clang 18+ with libc++ or 19+ with libstdc++, or Apple Clang 17+.
-- libcurl 7.85 or newer with its headers: `libcurl4-openssl-dev` on Ubuntu,
+- libcurl 7.86 or newer with its headers: `libcurl4-openssl-dev` on Ubuntu,
   built into macOS.
 
 CI builds on Linux, macOS for Apple silicon and Intel, and Windows with MSVC.
@@ -133,11 +133,15 @@ problems. `Error::code` says what went wrong:
 | `NetworkError` | Connection, TLS, or timeout failure, after retries. |
 | `RateLimited` | HTTP 429 or 503 after retries, or `ArchiveClient`'s own limit would wait more than 5 s. |
 | `ServerError` | HTTP 5xx other than 503, after retries, or an ArcGIS query that never finished paging. |
-| `InvalidRequest` | An unsupported day or hazard, HTTP 400, an ArcGIS error such as a bad layer ID, or a response over 64 MiB. |
+| `InvalidRequest` | An unsupported day or hazard, HTTP 400, an ArcGIS error such as a bad layer ID, a response over 64 MiB, or an ArcGIS query whose pages total more than that. |
 | `NotFound` | A URL or ArcGIS service that no longer exists. Report it as a bug. |
-| `ParseError` | Malformed JSON or Esri geometry that cannot be converted. |
+| `ParseError` | Malformed JSON, Esri geometry that cannot be converted, or not enough memory to build the result. |
 | `FeedUnavailable` | Only `StaticFeedClient` returns it. SPC has not issued the product, as with day 1 probabilities overnight. Treat it as no data. `ArcGISClient` returns an empty result instead. |
 | `Unknown` | Any other HTTP status, such as 422 for a malformed `ArchiveClient` timestamp. `Error::http_status` holds it. |
+
+ArcGIS reports its own failures with HTTP 200 and an error code in the body.
+`ArcGISClient` retries a 429 or 5xx code as it would the same HTTP status,
+repeating only the page that failed.
 
 The offline `parse_*` functions, such as `spc::parse_categorical(body, day)`,
 throw `std::runtime_error` on malformed JSON or Esri geometry that cannot be converted.
@@ -148,12 +152,15 @@ Projected edges are subdivided to preserve their boundaries within one metre.
 Malformed Esri points and invalid projected coordinates, including discarded
 holes, raise a parse error.
 A payload needing more than one million added points also raises a parse error.
+An `ArcGISClient` call counts every page and layer it reads as one payload.
 
 ## Settings and threads
 
 `spc::ClientConfig` sets the user agent, the 15 s timeout, and the 64 MiB
-response limit. The default user agent carries spc-cpp's contact address, so
-set one with yours:
+response limit. The server decides how many pages an ArcGIS query has, so that
+limit also caps the pages of one `ArcGISClient` call together; with a transport
+of your own the cap is 64 MiB. The default user agent carries spc-cpp's contact
+address, so set one with yours:
 
 ```cpp
 const spc::ArcGISClient client{spc::ClientConfig{.user_agent = "myapp/1.0 (you@example.com)"}};

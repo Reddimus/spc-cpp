@@ -74,14 +74,15 @@ std::uint8_t fire_severity_from_label(std::string_view label) noexcept {
 }
 
 FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t day,
-												  FireWeatherLayer layer) {
+												  FireWeatherLayer layer,
+												  detail::ProjectionBudget* budget) {
 	FireWeatherPayload payload;
 	payload.day = day;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	detail::PayloadGeometryParser geometry_parser(root);
+	detail::PayloadGeometryParser geometry_parser(root, budget);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
 		const Json* geometry = detail::lookup(feat, "geometry");
@@ -100,6 +101,9 @@ FireWeatherPayload detail::fire_weather_from_tree(const Json& root, std::int32_t
 			f.probability = detail::normalized_probability(*props);
 		} else if (f.label.empty()) {
 			f.label = label_from_dn(*props, layer);
+			if (f.label.empty()) {
+				continue; // no label and no known dn band
+			}
 		}
 		f.severity = fire_severity_from_label(f.label);
 		f.issued_at = detail::first_timestamp(*props, {"ISSUE", "issue"});

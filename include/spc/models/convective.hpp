@@ -52,7 +52,8 @@ struct ConditionalIntensityPayload {
 /// @throws std::runtime_error for invalid JSON or Esri geometry that cannot be converted.
 [[nodiscard]] Day48OutlookPayload parse_day4_8(std::string_view body, std::int32_t day);
 
-/// Parse a conditional-intensity layer (GeoJSON or Esri).
+/// Parse a conditional-intensity layer (GeoJSON or Esri). Polygons without a
+/// label are skipped.
 /// @throws std::runtime_error for invalid JSON or Esri geometry that cannot be converted.
 [[nodiscard]] ConditionalIntensityPayload
 parse_conditional_intensity(std::string_view body, std::int32_t day, std::string hazard);

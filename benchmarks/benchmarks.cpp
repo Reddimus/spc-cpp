@@ -307,21 +307,25 @@ bool allocation_counter_works() {
 	benchmark::DoNotOptimize(block);
 	::operator delete(block);
 	const std::uint64_t direct = probe.stats().allocations;
-	const std::runtime_error error("a message the standard library copies to the heap");
-	benchmark::DoNotOptimize(error.what());
-	const std::uint64_t library = probe.stats().allocations - direct;
 	if (direct != 1) {
 		std::fputs("The allocation counter misses operator new calls. Under Valgrind, run with "
 				   "--soname-synonyms=somalloc=nouserintercepts.\n",
 				   stderr);
 		return false;
 	}
+#if !defined(_MSVC_STL_VERSION)
+	// MSVC keeps exception messages in CRT memory, not operator new, so there
+	// it has no library allocation to observe.
+	const std::runtime_error error("a message the standard library copies to the heap");
+	benchmark::DoNotOptimize(error.what());
+	const std::uint64_t library = probe.stats().allocations - direct;
 	if (library == 0) {
 		std::fputs("The allocation counter misses allocations made inside the standard library, "
 				   "which happens when LTO internalizes the replacement operator new.\n",
 				   stderr);
 		return false;
 	}
+#endif
 	return true;
 }
 

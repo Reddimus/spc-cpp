@@ -12,8 +12,9 @@ Fixes land in the next release. Older tags are not patched, so upgrade your
 ## Reporting a vulnerability
 
 Use GitHub's [private vulnerability
-reporting](https://github.com/Reddimus/spc-cpp/security/advisories/new). Do not
-open a public issue.
+reporting](https://github.com/Reddimus/spc-cpp/security/advisories/new). It
+needs a GitHub account, and the report stays private until an advisory is
+published. Do not open a public issue.
 
 Include the affected version or commit, a minimal reproduction, and the
 impact you see, such as memory corruption or a denial of service.

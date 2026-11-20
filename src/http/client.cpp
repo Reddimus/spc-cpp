@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <curl/curl.h>
 #include <limits>
 #include <memory>
@@ -10,8 +11,9 @@
 #include <utility>
 #include <vector>
 
-#if !CURL_AT_LEAST_VERSION(7, 85, 0)
-#error "spc-cpp needs libcurl 7.85.0 or newer for CURLOPT_PROTOCOLS_STR"
+// 7.85 added CURLOPT_PROTOCOLS_STR; before 7.86, curl/header.h lacked extern "C".
+#if !CURL_AT_LEAST_VERSION(7, 86, 0)
+#error "spc-cpp needs libcurl 7.86.0 or newer"
 #endif
 
 namespace spc {
@@ -28,16 +30,43 @@ const ClientConfig kMovedFromConfig{};
 /// Collects the body up to a ceiling. Returning a short count from the write
 /// callback makes libcurl abort with CURLE_WRITE_ERROR.
 struct BodySink {
+	CURL* curl{nullptr};
 	std::string body;
 	std::size_t limit{0};
+	bool started{false};
 	bool overflowed{false};
 	bool failed{false};
 };
 
-// libcurl is C, so no exception may leave this callback.
+/// Whether the response being received announces an identity body over
+/// `limit`. An encoded Content-Length says nothing about the decoded size, so
+/// those bodies are left to the running count.
+bool announces_more_than(CURL* curl, std::size_t limit) noexcept {
+	curl_off_t length = -1;
+	if (curl_easy_getinfo(curl, CURLINFO_CONTENT_LENGTH_DOWNLOAD_T, &length) != CURLE_OK ||
+		length < 0) {
+		return false;
+	}
+	curl_header* encoding = nullptr;
+	if (curl_easy_header(curl, "Content-Encoding", 0, CURLH_HEADER, -1, &encoding) == CURLHE_OK) {
+		return false;
+	}
+	return static_cast<std::uint64_t>(length) > static_cast<std::uint64_t>(limit);
+}
+
+// libcurl is C, so no exception may leave this callback. It sees only the
+// final response: libcurl drops the bodies of redirects it follows, which is
+// why the early size check lives here and not in CURLOPT_MAXFILESIZE.
 std::size_t write_body(char* data, std::size_t size, std::size_t count, void* user) noexcept {
 	BodySink* sink = static_cast<BodySink*>(user);
 	const std::size_t chunk = size * count;
+	if (!sink->started) {
+		sink->started = true;
+		if (sink->limit > 0 && announces_more_than(sink->curl, sink->limit)) {
+			sink->overflowed = true;
+			return 0;
+		}
+	}
 	if (sink->limit > 0 && chunk > sink->limit - sink->body.size()) {
 		sink->overflowed = true;
 		return 0;
@@ -51,9 +80,17 @@ std::size_t write_body(char* data, std::size_t size, std::size_t count, void* us
 	return chunk;
 }
 
+/// Whether libcurl fetches `url` over TLS. It ignores the scheme's case and
+/// takes one to three slashes after it, so this matches the first slash only.
+bool is_https_url(std::string_view url) {
+	return url.size() >= 7 && curl_strnequal(url.data(), "https:/", 7) != 0;
+}
+
+/// Whether `path` names its own HTTP(S) scheme, by the same rule as libcurl;
+/// otherwise a one-slash "https:/host" would be appended to a plaintext base.
 bool is_absolute_url(std::string_view path) {
-	return (path.size() >= 7 && curl_strnequal(path.data(), "http://", 7) != 0) ||
-		   (path.size() >= 8 && curl_strnequal(path.data(), "https://", 8) != 0);
+	return (path.size() >= 6 && curl_strnequal(path.data(), "http:/", 6) != 0) ||
+		   is_https_url(path);
 }
 
 /// libcurl's process-wide state. Each client holds a shared reference, so the
@@ -127,6 +164,10 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 			Error::invalid_request("ClientConfig::timeout is outside libcurl's supported range"));
 	}
 
+	// An https request stays on https: anyone on the path could alter a
+	// response fetched over an http redirect.
+	const char* const redirects = is_https_url(url) ? "https" : "http,https";
+
 	// Refuse to send anything unless the restrictions actually took effect;
 	// an older runtime libcurl rejects CURLOPT_PROTOCOLS_STR and would then
 	// happily read file:// URLs.
@@ -134,7 +175,7 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	const bool configured =
 		curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
 		curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https") == CURLE_OK &&
-		curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https") == CURLE_OK &&
+		curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, redirects) == CURLE_OK &&
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verify) == CURLE_OK &&
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verify * 2L) == CURLE_OK;
 	if (!configured) {
@@ -142,6 +183,7 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	}
 
 	BodySink sink;
+	sink.curl = curl;
 	sink.limit = config.max_response_bytes;
 	curl_easy_setopt(curl, CURLOPT_ERRORBUFFER, connection.errors.data());
 	curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, &write_body);
@@ -151,14 +193,10 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	curl_easy_setopt(curl, CURLOPT_NOSIGNAL, 1L);
 	curl_easy_setopt(curl, CURLOPT_USERAGENT, config.user_agent.c_str());
 	curl_easy_setopt(curl, CURLOPT_ACCEPT_ENCODING, "");
-	if (sink.limit > 0) {
-		// Lets libcurl refuse early when Content-Length is already too big.
-		curl_easy_setopt(curl, CURLOPT_MAXFILESIZE_LARGE, static_cast<curl_off_t>(sink.limit));
-	}
 
 	const CURLcode rc = curl_easy_perform(curl);
 	// Not a NetworkError: retrying would download the same body again.
-	if (sink.overflowed || rc == CURLE_FILESIZE_EXCEEDED) {
+	if (sink.overflowed) {
 		return std::unexpected(
 			Error::invalid_request("response exceeded ClientConfig::max_response_bytes"));
 	}
@@ -166,9 +204,17 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 		return std::unexpected(Error::network("out of memory while reading the response"));
 	}
 	if (rc != CURLE_OK) {
-		const bool detailed = connection.errors.front() != '\0';
-		return std::unexpected(
-			Error::network(detailed ? connection.errors.data() : curl_easy_strerror(rc)));
+		std::string message =
+			connection.errors.front() != '\0' ? connection.errors.data() : curl_easy_strerror(rc);
+		// These fail the same way on every attempt, so they are not NetworkError,
+		// which with_retry repeats.
+		if (rc == CURLE_UNSUPPORTED_PROTOCOL || rc == CURLE_URL_MALFORMAT) {
+			return std::unexpected(Error::invalid_request(std::move(message)));
+		}
+		if (rc == CURLE_TOO_MANY_REDIRECTS) {
+			return std::unexpected(Error::server(std::move(message)));
+		}
+		return std::unexpected(Error::network(std::move(message)));
 	}
 
 	long status = 0;

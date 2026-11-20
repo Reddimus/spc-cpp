@@ -12,16 +12,16 @@ namespace spc {
 
 using detail::Json;
 
-MesoscalePayload detail::mesoscale_from_tree(const Json& root) {
+MesoscalePayload detail::mesoscale_from_tree(const Json& root, detail::ProjectionBudget* budget) {
 	MesoscalePayload payload;
 	const Json* features_node = detail::lookup(root, "features");
 	if (features_node == nullptr || !features_node->is_array()) {
 		return payload;
 	}
-	detail::PayloadGeometryParser geometry_parser(root);
+	detail::PayloadGeometryParser geometry_parser(root, budget);
 	for (const Json& feat : features_node->get_array()) {
 		const Json* props = detail::feature_fields(feat);
-		if (props == nullptr || !props->is_object()) {
+		if (props == nullptr) {
 			continue;
 		}
 		MesoscaleDiscussion md;
