@@ -27,7 +27,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang-format libcurl4-openssl-dev locales
+            build-essential clang-format libcurl4-openssl-dev libssl-dev locales
           # The locale tests skip without a comma-decimal locale.
           sudo locale-gen de_DE.UTF-8
       - name: Build
@@ -56,7 +56,7 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential clang-18 libc++-18-dev libc++abi-18-dev \
-            libcurl4-openssl-dev locales
+            libcurl4-openssl-dev libssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build
         run: >-
@@ -75,7 +75,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential clang-19 libcurl4-openssl-dev
+            build-essential clang-19 libcurl4-openssl-dev libssl-dev
       - name: Build
         run: >-
           make build CMAKE_ARGS="-DCMAKE_CXX_COMPILER=clang++-19
@@ -210,7 +210,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev libssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build with AddressSanitizer and UndefinedBehaviorSanitizer
         run: >-
@@ -230,7 +230,7 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            build-essential libcurl4-openssl-dev locales
+            build-essential libcurl4-openssl-dev libssl-dev locales
           sudo locale-gen de_DE.UTF-8
       - name: Build with ThreadSanitizer
         run: >-

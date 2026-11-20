@@ -5,6 +5,7 @@
 #include "spc/http_client.hpp"
 #include "spc/retry.hpp"
 #include "support/loopback_server.hpp"
+#include "support/tls_loopback_server.hpp"
 
 #include <atomic>
 #include <chrono>
@@ -349,6 +350,164 @@ TEST(HttpClient, RefusesARedirectToAnotherScheme) {
 	ASSERT_FALSE(response);
 	EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest);
 }
+
+TEST(HttpClient, AFailedHttpsRequestLeavesHttpRedirectsAllowedOnItsHandle) {
+	LoopbackServer target{[](const LoopbackRequest&) { return http_response("200 OK", "ok"); }};
+	LoopbackServer origin{[&target](const LoopbackRequest&) {
+		return http_response("302 Found", "", "Location: " + target.url("/final") + "\r\n");
+	}};
+	ClientConfig config;
+	config.timeout = std::chrono::seconds{1};
+	const HttpClient client{config};
+
+	// Port zero cannot host a server; the request only configures the handle.
+	EXPECT_FALSE(client.get("https://127.0.0.1:0/"));
+	const Result<HttpResponse> response = client.get(origin.url("/start"));
+
+	ASSERT_TRUE(response) << response.error().message;
+	EXPECT_EQ(response->body, "ok");
+}
+
+#ifdef SPC_TEST_HAS_TLS_SERVER
+
+using test::TlsLoopbackServer;
+
+/// TlsLoopbackServer's certificate is self-signed.
+ClientConfig unverified_tls() {
+	ClientConfig config;
+	config.verify_ssl = false;
+	return config;
+}
+
+bool curl_has_tls() {
+	return (curl_version_info(CURLVERSION_NOW)->features & CURL_VERSION_SSL) != 0;
+}
+
+TEST(HttpClient, AnHttpsRequestRefusesARedirectToHttp) {
+	if (!curl_has_tls()) {
+		GTEST_SKIP() << "libcurl was built without TLS";
+	}
+	// Anyone on the path can alter the plaintext hop, so its body must not
+	// come back as the answer to an https request.
+	LoopbackServer plain{
+		[](const LoopbackRequest&) { return http_response("200 OK", "plaintext"); }};
+	TlsLoopbackServer secure{[&plain](const LoopbackRequest& request) {
+		if (request.target == "/two-hops") {
+			return http_response("302 Found", "", "Location: /start\r\n");
+		}
+		return http_response("302 Found", "", "Location: " + plain.url("/final") + "\r\n");
+	}};
+	const HttpClient client{unverified_tls()};
+	ClientConfig based = unverified_tls();
+	based.base_url = "HTTPS://" + secure.authority();
+	const HttpClient based_client{based};
+
+	// libcurl ignores the scheme's case and takes one to three slashes after it.
+	std::vector<std::pair<std::string, Result<HttpResponse>>> responses;
+	for (const std::string scheme : {"https://", "HTTPS://", "hTtPs:/", "https:///"}) {
+		responses.emplace_back(scheme, client.get(scheme + secure.authority() + "/start"));
+	}
+	responses.emplace_back("base_url", based_client.get("/start"));
+	responses.emplace_back("https, https, http", client.get(secure.url("/two-hops")));
+
+	for (const std::pair<std::string, Result<HttpResponse>>& entry : responses) {
+		const Result<HttpResponse>& response = entry.second;
+		if (response) {
+			ADD_FAILURE() << entry.first << " followed the redirect and returned \""
+						  << response->body << "\" with status " << response->status_code;
+			continue;
+		}
+		// Not NetworkError, which with_retry would retry.
+		EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest)
+			<< entry.first << ": " << response.error().message;
+	}
+	// Every request got its redirect: none failed earlier, in the handshake.
+	EXPECT_EQ(secure.requests().size(), responses.size() + 1);
+	EXPECT_TRUE(plain.requests().empty()) << "the plaintext server was contacted";
+}
+
+TEST(HttpClient, AnHttpsRequestFollowsHttpsRedirects) {
+	if (!curl_has_tls()) {
+		GTEST_SKIP() << "libcurl was built without TLS";
+	}
+	TlsLoopbackServer target{[](const LoopbackRequest& request) {
+		if (request.target == "/relative") {
+			return http_response("302 Found", "", "Location: /final\r\n");
+		}
+		return http_response("200 OK", "secure");
+	}};
+	TlsLoopbackServer origin{[&target](const LoopbackRequest&) {
+		return http_response("302 Found", "", "Location: " + target.url("/relative") + "\r\n");
+	}};
+	const HttpClient client{unverified_tls()};
+
+	const Result<HttpResponse> response = client.get(origin.url("/start"));
+
+	ASSERT_TRUE(response) << response.error().message;
+	EXPECT_EQ(response->body, "secure");
+	EXPECT_EQ(target.requests().size(), 2U);
+}
+
+TEST(HttpClient, AnHttpRequestFollowsRedirectsToHttpAndHttps) {
+	if (!curl_has_tls()) {
+		GTEST_SKIP() << "libcurl was built without TLS";
+	}
+	LoopbackServer plain{
+		[](const LoopbackRequest&) { return http_response("200 OK", "plaintext"); }};
+	TlsLoopbackServer secure{
+		[](const LoopbackRequest&) { return http_response("200 OK", "secure"); }};
+	LoopbackServer origin{[&plain, &secure](const LoopbackRequest& request) {
+		const std::string location =
+			request.target == "/to-https" ? secure.url("/final") : plain.url("/final");
+		return http_response("302 Found", "", "Location: " + location + "\r\n");
+	}};
+	const HttpClient client{unverified_tls()};
+
+	const Result<HttpResponse> to_http = client.get(origin.url("/to-http"));
+	const Result<HttpResponse> to_https = client.get(origin.url("/to-https"));
+
+	ASSERT_TRUE(to_http) << to_http.error().message;
+	EXPECT_EQ(to_http->body, "plaintext");
+	ASSERT_TRUE(to_https) << to_https.error().message;
+	EXPECT_EQ(to_https->body, "secure");
+}
+
+TEST(HttpClient, ReusedHandlesTakeTheRedirectRuleOfEachRequest) {
+	if (!curl_has_tls()) {
+		GTEST_SKIP() << "libcurl was built without TLS";
+	}
+	// Sequential requests share one pooled handle, so neither rule may outlive
+	// the request that set it.
+	LoopbackServer plain{[](const LoopbackRequest& request) {
+		if (request.target == "/start") {
+			return http_response("302 Found", "", "Location: /final\r\n");
+		}
+		return http_response("200 OK", "plaintext");
+	}};
+	TlsLoopbackServer secure{[&plain](const LoopbackRequest&) {
+		return http_response("302 Found", "", "Location: " + plain.url("/final") + "\r\n");
+	}};
+	const HttpClient client{unverified_tls()};
+
+	const Result<HttpResponse> first_https = client.get(secure.url("/start"));
+	const Result<HttpResponse> http = client.get(plain.url("/start"));
+	const Result<HttpResponse> second_https = client.get(secure.url("/start"));
+
+	EXPECT_FALSE(first_https);
+	ASSERT_TRUE(http) << http.error().message;
+	EXPECT_EQ(http->body, "plaintext");
+	EXPECT_FALSE(second_https);
+	EXPECT_EQ(secure.requests().size(), 2U); // both https requests got their redirect
+	EXPECT_EQ(plain.requests().size(), 2U);	 // only the http request's two hops
+}
+
+#else
+
+TEST(HttpClient, HttpsRedirectTestsNeedATlsServer) {
+	GTEST_SKIP() << "built without OpenSSL 3, so the https redirect tests did not run";
+}
+
+#endif // SPC_TEST_HAS_TLS_SERVER
 
 TEST(HttpClient, ARedirectLoopIsAServerErrorThatIsNotRetried) {
 	LoopbackServer server{[](const LoopbackRequest&) {

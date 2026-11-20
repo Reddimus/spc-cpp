@@ -11,8 +11,9 @@
 #include <utility>
 #include <vector>
 
-#if !CURL_AT_LEAST_VERSION(7, 85, 0)
-#error "spc-cpp needs libcurl 7.85.0 or newer for CURLOPT_PROTOCOLS_STR"
+// 7.85 added CURLOPT_PROTOCOLS_STR; before 7.86, curl/header.h lacked extern "C".
+#if !CURL_AT_LEAST_VERSION(7, 86, 0)
+#error "spc-cpp needs libcurl 7.86.0 or newer"
 #endif
 
 namespace spc {
@@ -82,6 +83,12 @@ std::size_t write_body(char* data, std::size_t size, std::size_t count, void* us
 bool is_absolute_url(std::string_view path) {
 	return (path.size() >= 7 && curl_strnequal(path.data(), "http://", 7) != 0) ||
 		   (path.size() >= 8 && curl_strnequal(path.data(), "https://", 8) != 0);
+}
+
+/// Whether libcurl fetches `url` over TLS. It ignores the scheme's case and
+/// takes one to three slashes after it, so this matches the first slash only.
+bool is_https_url(std::string_view url) {
+	return url.size() >= 7 && curl_strnequal(url.data(), "https:/", 7) != 0;
 }
 
 /// libcurl's process-wide state. Each client holds a shared reference, so the
@@ -155,6 +162,10 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 			Error::invalid_request("ClientConfig::timeout is outside libcurl's supported range"));
 	}
 
+	// An https request stays on https: anyone on the path could alter a
+	// response fetched over an http redirect.
+	const char* const redirects = is_https_url(url) ? "https" : "http,https";
+
 	// Refuse to send anything unless the restrictions actually took effect;
 	// an older runtime libcurl rejects CURLOPT_PROTOCOLS_STR and would then
 	// happily read file:// URLs.
@@ -162,7 +173,7 @@ Result<HttpResponse> perform(Connection& connection, const std::string& url,
 	const bool configured =
 		curl_easy_setopt(curl, CURLOPT_URL, url.c_str()) == CURLE_OK &&
 		curl_easy_setopt(curl, CURLOPT_PROTOCOLS_STR, "http,https") == CURLE_OK &&
-		curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, "http,https") == CURLE_OK &&
+		curl_easy_setopt(curl, CURLOPT_REDIR_PROTOCOLS_STR, redirects) == CURLE_OK &&
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYPEER, verify) == CURLE_OK &&
 		curl_easy_setopt(curl, CURLOPT_SSL_VERIFYHOST, verify * 2L) == CURLE_OK;
 	if (!configured) {

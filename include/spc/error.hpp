@@ -29,8 +29,9 @@ enum class ErrorCode {
 	/// returns it.
 	FeedUnavailable,
 	/// The request cannot succeed as asked: an unsupported day or hazard, a
-	/// malformed URL or one that is not HTTP(S), HTTP 400, an ArcGIS error such
-	/// as an invalid parameter, or a response larger than
+	/// malformed URL or one that is not HTTP(S), a refused redirect (to another
+	/// scheme, or from HTTPS to HTTP), HTTP 400, an ArcGIS error such as an
+	/// invalid parameter, or a response larger than
 	/// `ClientConfig::max_response_bytes`.
 	InvalidRequest,
 	/// The body was not valid JSON. Valid JSON without the expected fields

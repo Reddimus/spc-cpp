@@ -6,7 +6,15 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- An HTTPS request no longer follows a redirect to plain HTTP; it fails with
+  `InvalidRequest`.
+
 ### Changed
+
+- libcurl 7.86 is the minimum. 7.85's `curl/header.h` lacks `extern "C"`, so the
+  library never linked against it.
 
 - Report a malformed URL or a scheme other than HTTP(S) as `InvalidRequest`, and a
   redirect loop as `ServerError`. `with_retry` no longer repeats them.

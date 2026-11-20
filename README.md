@@ -38,7 +38,7 @@ int main() {
 - CMake 3.31 or newer. Ubuntu 24.04 ships 3.28, so run
   `sudo snap install cmake --classic`.
 - GCC 13+, Clang 18+ with libc++ or 19+ with libstdc++, or Apple Clang 17+.
-- libcurl 7.85 or newer with its headers: `libcurl4-openssl-dev` on Ubuntu,
+- libcurl 7.86 or newer with its headers: `libcurl4-openssl-dev` on Ubuntu,
   built into macOS.
 
 CI builds on Linux, macOS for Apple silicon and Intel, and Windows with MSVC.

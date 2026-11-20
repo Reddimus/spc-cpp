@@ -61,7 +61,8 @@ protected:
 };
 
 /// libcurl-backed transport. Follows redirects, accepts compressed bodies,
-/// and speaks only http and https.
+/// and speaks only http and https. An https request follows only https
+/// redirects, so its response never arrives over plaintext.
 ///
 /// Thread-safe: concurrent `get` calls each use their own pooled libcurl
 /// handle, and handles are reused so connections stay open between requests.
@@ -77,7 +78,8 @@ public:
 
 	/// Absolute HTTP and HTTPS URLs use case-insensitive schemes and bypass
 	/// `config().base_url`; other inputs are appended to it. Transfers and
-	/// redirects permit only HTTP and HTTPS.
+	/// redirects permit only HTTP and HTTPS, and an HTTPS request refuses a
+	/// redirect to HTTP. A refused redirect is `ErrorCode::InvalidRequest`.
 	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
 	/// The settings this client was built with; defaults on a moved-from client.

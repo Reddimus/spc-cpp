@@ -79,6 +79,45 @@ inline void initialize() {}
 inline void set_option(Socket socket, int option, const void* value, int length) {
 	(void)::setsockopt(socket, SOL_SOCKET, option, static_cast<const char*>(value), length);
 }
+
+/// A listening socket on 127.0.0.1; `port` receives the free port it got.
+inline Socket listen_on_loopback(std::uint16_t& port) {
+	initialize();
+	const Socket listener = ::socket(AF_INET, SOCK_STREAM, 0);
+	if (listener == kInvalidSocket) {
+		throw std::runtime_error("socket() failed");
+	}
+	const int reuse = 1;
+	set_option(listener, SO_REUSEADDR, &reuse, sizeof(reuse));
+	sockaddr_in address{};
+	address.sin_family = AF_INET;
+	address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+	address.sin_port = 0; // any free port
+	if (::bind(listener, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
+		::listen(listener, 64) != 0) {
+		close_socket(listener);
+		throw std::runtime_error("bind() or listen() failed");
+	}
+	AddressLength length = sizeof(address);
+	(void)::getsockname(listener, reinterpret_cast<sockaddr*>(&address), &length);
+	port = ntohs(address.sin_port);
+	return listener;
+}
+
+/// Bound how long a stalled client can hold the serving thread.
+inline void limit_io_time(Socket client) {
+#ifdef _WIN32
+	const DWORD timeout = 2000;
+#else
+	const timeval timeout{2, 0};
+#endif
+	set_option(client, SO_RCVTIMEO, &timeout, sizeof(timeout));
+	set_option(client, SO_SNDTIMEO, &timeout, sizeof(timeout));
+#ifdef SO_NOSIGPIPE
+	const int no_sigpipe = 1;
+	set_option(client, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
+#endif
+}
 } // namespace socket_detail
 
 struct LoopbackRequest {
@@ -95,30 +134,41 @@ struct LoopbackRequest {
 	}
 };
 
+/// The request line's target and the headers of a raw request.
+inline LoopbackRequest parse_request(const std::string& raw) {
+	LoopbackRequest request;
+	const std::size_t line_end = raw.find("\r\n");
+	const std::string request_line = raw.substr(0, line_end);
+	const std::size_t first_space = request_line.find(' ');
+	const std::size_t second_space = request_line.find(' ', first_space + 1);
+	if (first_space != std::string::npos && second_space != std::string::npos) {
+		request.target = request_line.substr(first_space + 1, second_space - first_space - 1);
+	}
+	std::size_t start = line_end + 2;
+	while (start < raw.size()) {
+		const std::size_t end = raw.find("\r\n", start);
+		if (end == std::string::npos || end == start) {
+			break;
+		}
+		const std::string line = raw.substr(start, end - start);
+		const std::size_t colon = line.find(':');
+		if (colon != std::string::npos) {
+			const std::size_t value_start = line.find_first_not_of(' ', colon + 1);
+			request.headers.emplace_back(line.substr(0, colon), value_start == std::string::npos
+																	? std::string{}
+																	: line.substr(value_start));
+		}
+		start = end + 2;
+	}
+	return request;
+}
+
 class LoopbackServer {
 public:
 	using Handler = std::function<std::string(const LoopbackRequest&)>;
 
 	explicit LoopbackServer(Handler handler) : handler_(std::move(handler)) {
-		socket_detail::initialize();
-		listener_ = ::socket(AF_INET, SOCK_STREAM, 0);
-		if (listener_ == socket_detail::kInvalidSocket) {
-			throw std::runtime_error("socket() failed");
-		}
-		const int reuse = 1;
-		socket_detail::set_option(listener_, SO_REUSEADDR, &reuse, sizeof(reuse));
-		sockaddr_in address{};
-		address.sin_family = AF_INET;
-		address.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
-		address.sin_port = 0; // any free port
-		if (::bind(listener_, reinterpret_cast<const sockaddr*>(&address), sizeof(address)) != 0 ||
-			::listen(listener_, 64) != 0) {
-			socket_detail::close_socket(listener_);
-			throw std::runtime_error("bind() or listen() failed");
-		}
-		socket_detail::AddressLength length = sizeof(address);
-		(void)::getsockname(listener_, reinterpret_cast<sockaddr*>(&address), &length);
-		port_ = ntohs(address.sin_port);
+		listener_ = socket_detail::listen_on_loopback(port_);
 		thread_ = std::thread([this] { serve(); });
 	}
 
@@ -162,17 +212,7 @@ private:
 	}
 
 	void handle(socket_detail::Socket client) {
-#ifdef _WIN32
-		const DWORD timeout = 2000;
-#else
-		const timeval timeout{2, 0};
-#endif
-		socket_detail::set_option(client, SO_RCVTIMEO, &timeout, sizeof(timeout));
-		socket_detail::set_option(client, SO_SNDTIMEO, &timeout, sizeof(timeout));
-#ifdef SO_NOSIGPIPE
-		const int no_sigpipe = 1;
-		socket_detail::set_option(client, SO_NOSIGPIPE, &no_sigpipe, sizeof(no_sigpipe));
-#endif
+		socket_detail::limit_io_time(client);
 		std::string raw;
 		std::vector<char> buffer(4096);
 		while (raw.find("\r\n\r\n") == std::string::npos && raw.size() < 65536) {
@@ -183,41 +223,13 @@ private:
 			}
 			raw.append(buffer.data(), static_cast<std::size_t>(received));
 		}
-		const LoopbackRequest request = parse(raw);
+		const LoopbackRequest request = parse_request(raw);
 		{
 			const std::lock_guard<std::mutex> lock(mutex_);
 			requests_.push_back(request);
 		}
 		send_all(client, handler_(request));
 		(void)::shutdown(client, socket_detail::kShutdownWrite);
-	}
-
-	static LoopbackRequest parse(const std::string& raw) {
-		LoopbackRequest request;
-		const std::size_t line_end = raw.find("\r\n");
-		const std::string request_line = raw.substr(0, line_end);
-		const std::size_t first_space = request_line.find(' ');
-		const std::size_t second_space = request_line.find(' ', first_space + 1);
-		if (first_space != std::string::npos && second_space != std::string::npos) {
-			request.target = request_line.substr(first_space + 1, second_space - first_space - 1);
-		}
-		std::size_t start = line_end + 2;
-		while (start < raw.size()) {
-			const std::size_t end = raw.find("\r\n", start);
-			if (end == std::string::npos || end == start) {
-				break;
-			}
-			const std::string line = raw.substr(start, end - start);
-			const std::size_t colon = line.find(':');
-			if (colon != std::string::npos) {
-				const std::size_t value_start = line.find_first_not_of(' ', colon + 1);
-				request.headers.emplace_back(line.substr(0, colon), value_start == std::string::npos
-																		? std::string{}
-																		: line.substr(value_start));
-			}
-			start = end + 2;
-		}
-		return request;
 	}
 
 	void send_all(socket_detail::Socket client, const std::string& response) {

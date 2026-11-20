@@ -99,8 +99,9 @@ if(SPC_ENABLE_COVERAGE)
     add_link_options(--coverage)
 endif()
 
-# CURLOPT_PROTOCOLS_STR, which keeps the transport on http and https, needs 7.85.
-find_package(CURL 7.85 REQUIRED)
+# 7.85 added CURLOPT_PROTOCOLS_STR, which keeps the transport on http and https,
+# and 7.86 made curl/header.h's functions extern "C", so C++ can link them.
+find_package(CURL 7.86 REQUIRED)
 find_package(Threads REQUIRED)
 
 include(FetchContent)

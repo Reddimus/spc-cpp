@@ -19,6 +19,35 @@ if(WIN32)
         _CRT_SECURE_NO_WARNINGS)
 endif()
 
+# The https redirect tests need a TLS server, which tests/support builds on
+# OpenSSL 3. It is optional and those tests skip without it. The link check
+# turns it off where the copy found cannot serve the build, such as a
+# universal macOS binary against Homebrew's single-architecture OpenSSL; it
+# is not cached, because the architectures can change between configures.
+# Windows is left out: its tests would need OpenSSL's DLLs on PATH to start.
+unset(SPC_TEST_OPENSSL_LINKS CACHE)
+if(NOT WIN32)
+    find_package(OpenSSL 3.0 QUIET)
+    if(OpenSSL_FOUND)
+        include(CheckCXXSourceCompiles)
+        set(CMAKE_REQUIRED_LIBRARIES OpenSSL::SSL)
+        set(CMAKE_REQUIRED_QUIET ON)
+        check_cxx_source_compiles("
+            #include <openssl/ssl.h>
+            int main() { return SSL_CTX_new(TLS_server_method()) == nullptr ? 1 : 0; }"
+            SPC_TEST_OPENSSL_LINKS)
+        unset(CMAKE_REQUIRED_LIBRARIES)
+        unset(CMAKE_REQUIRED_QUIET)
+        if(SPC_TEST_OPENSSL_LINKS)
+            target_link_libraries(spc_tests PRIVATE OpenSSL::SSL)
+            target_compile_definitions(spc_tests PRIVATE SPC_TEST_HAS_TLS_SERVER)
+        endif()
+    endif()
+endif()
+if(NOT SPC_TEST_OPENSSL_LINKS)
+    message(STATUS "No usable OpenSSL 3: the https redirect tests will skip")
+endif()
+
 spc_set_warnings(spc_tests)
 target_link_libraries(spc_tests PRIVATE spc::spc GTest::gtest_main Threads::Threads)
 # Tests reach the private JSON helpers in src/models/json.hpp.
