@@ -53,11 +53,12 @@ jobs:
 
       - name: Extract the release notes
         # Write to a file: echoing the notes through the shell would run their
-        # `code` spans as command substitutions.
+        # `code` spans as command substitutions. index() matches the heading
+        # literally; a regex would read the version's "." and "+" as operators.
         run: |
           version="${GITHUB_REF_NAME#v}"
           awk -v v="$version" '
-            $0 ~ "^## \\[" v "\\]" { capture = 1; next }
+            index($0, "## [" v "]") == 1 { capture = 1; next }
             capture && /^## / { exit }
             capture && /^\[[^]]+\]: / { exit }
             capture { print }

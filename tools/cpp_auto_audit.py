@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """Fail when C++ sources use `auto` outside the allowed cases.
 
-Allowed: structured bindings, lambda objects, iterator-like values, and any
-line with an `auto-ok` comment. Everything else spells out its type. The allowlist file
-takes one `relative/path.cpp|line snippet` rule per line, matched as a
-substring of the stripped source line.
+Allowed: structured bindings, lambda objects, iterators, and any line with an
+`auto-ok` comment. Everything else spells out its type. Without type
+information, an iterator is recognized only when the whole initializer is one
+iterator-producing call, such as `v.begin()`, `m.find(k)` or `std::next(it)`.
+Function and template parameters are not checked. The allowlist file takes
+one `relative/path.cpp|line snippet` rule per line, matched as a substring of
+the stripped source line.
 """
 
 from __future__ import annotations
 
 import argparse
+from collections.abc import Iterator
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -20,55 +24,36 @@ import re
 CPP_SUFFIXES = {".cpp", ".hpp", ".cc", ".cxx", ".hh", ".hxx"}
 DEFAULT_ALLOWLIST = "tools/cpp_auto_allowlist.txt"
 WORD_AUTO = re.compile(r"\bauto\b")
+IDENTIFIER = re.compile(r"[A-Za-z_]\w*")
 DECL_SPECIFIERS = {
     "const", "constexpr", "static", "volatile", "mutable",
     "constinit", "thread_local", "extern", "inline",
 }
-DECL_SPECIFIER = "(?:" + "|".join(sorted(DECL_SPECIFIERS)) + ")"
-AUTO_DECLARATOR = rf"\bauto\b(?:\s*(?:[\*&]|{DECL_SPECIFIER}\b))*\s*"
-STRUCTURED_BINDING = re.compile(AUTO_DECLARATOR + r"\[")
-DECLARATION_AUTO = re.compile(
-    r"^\s*(?:}\s*)?(?:(?:else\s+)?if(?:\s+constexpr)?\s*\(\s*|(?:for|while|switch)\s*\(\s*)?"
-    + rf"(?:{DECL_SPECIFIER}\s+)*"
-    + AUTO_DECLARATOR
-    + rf"(?:(?!{DECL_SPECIFIER}\b)\w+\b(?!\s*[,)])|\[)"
-)
-
-ITERATOR_HINTS = (
-    ".begin(",
-    ".end(",
-    ".cbegin(",
-    ".cend(",
-    ".rbegin(",
-    ".rend(",
-    ".crbegin(",
-    ".crend(",
-    ".find(",
-    ".lower_bound(",
-    ".upper_bound(",
-    ".equal_range(",
-    "std::begin(",
-    "std::end(",
-    "std::cbegin(",
-    "std::cend(",
-    "std::find(",
-    "std::lower_bound(",
-    "std::upper_bound(",
-    "std::equal_range(",
-    "std::max_element(",
-    "std::min_element(",
-    "std::prev(",
-    "std::next(",
-)
+# Words that may precede `auto` without being a type-constraint (concept) name.
+NOT_CONSTRAINTS = DECL_SPECIFIERS | {
+    "case", "co_await", "co_return", "co_yield", "consteval", "do", "else", "explicit",
+    "friend", "new", "operator", "requires", "return", "template", "throw", "typedef",
+    "typename", "using", "virtual",
+}
+CONDITION_KEYWORDS = {"for", "if", "switch", "while"}
+PAIRS = {"(": ")", "[": "]", "{": "}"}
+ITERATOR_MEMBERS = {
+    "begin", "end", "cbegin", "cend", "rbegin", "rend", "crbegin", "crend",
+    "find", "lower_bound", "upper_bound", "equal_range",
+}
+ITERATOR_FUNCTIONS = {  # in namespace std
+    "begin", "end", "cbegin", "cend", "find", "lower_bound", "upper_bound",
+    "equal_range", "max_element", "min_element", "prev", "next",
+}
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class AllowRule:
     relative_path: str
     snippet: str
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class Violation:
     relative_path: str
     line_number: int
@@ -123,59 +108,224 @@ CPP_TOKEN = re.compile(
 )
 
 
-def declaration_code(line: str) -> str:
-    """Hide declaration groups while preserving initializer character offsets."""
-    tokens = list(CPP_TOKEN.finditer(line))
-    code = list(line)
+def group_end(tokens: list[str], start: int) -> int | None:
+    """Index of the bracket that closes tokens[start]."""
+    opener, closer = tokens[start], PAIRS[tokens[start]]
+    depth = 0
+    for index in range(start, len(tokens)):
+        if tokens[index] == opener:
+            depth += 1
+        elif tokens[index] == closer:
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
 
-    def hide_group(start: int, opener: str, closer: str) -> int:
-        depth = 0
-        for end in range(start, len(tokens)):
-            text = tokens[end][0]
-            if text == opener:
-                depth += 1
-            elif text == closer:
-                depth -= 1
-                if depth == 0:
-                    code[tokens[start].start():tokens[end].end()] = " " * (
-                        tokens[end].end() - tokens[start].start()
-                    )
-                    return end + 1
-        return len(tokens)
 
+def group_start(tokens: list[str], end: int, opener: str) -> int | None:
+    """Index of the `opener` that tokens[end] closes."""
+    closer = tokens[end]
+    depth = 0
+    for index in range(end, -1, -1):
+        if tokens[index] == closer:
+            depth += 1
+        elif tokens[index] == opener:
+            depth -= 1
+            if depth == 0:
+                return index
+    return None
+
+
+def code_tokens(source: str, start: int) -> Iterator[str]:
+    # Keep literals: find()'s arguments show whether it is a string search.
+    for token in CPP_TOKEN.finditer(source, start):
+        if not token[0].startswith(("//", "/*")):
+            yield token[0]
+
+
+def statement_tokens(source: str, start: int) -> list[str]:
+    """Tokens through the `;` or unmatched closer that ends the statement."""
+    tokens: list[str] = []
+    depth = 0
+    for text in code_tokens(source, start):
+        tokens.append(text)
+        if text in PAIRS:
+            depth += 1
+        elif text in PAIRS.values():
+            depth -= 1
+            if depth < 0:
+                break
+        elif text == ";" and depth == 0:
+            break
+    return tokens
+
+
+def leading_expression(tokens: list[str]) -> list[str]:
+    """Tokens before the first ungrouped `,` or `;`, or an unmatched closer."""
+    depth = 0
+    for index, text in enumerate(tokens):
+        if text in PAIRS:
+            depth += 1
+        elif text in PAIRS.values():
+            if depth == 0:
+                return tokens[:index]
+            depth -= 1
+        elif text in {",", ";"} and depth == 0:
+            return tokens[:index]
+    return tokens
+
+
+def is_text_literal(token: str) -> bool:
+    return '"' in token or token.startswith("'")
+
+
+def iterator_call(tokens: list[str]) -> bool:
+    """Whether the whole expression is one call that yields an iterator.
+
+    The call may end a member chain, as in `a.items().begin()`, but not be an
+    operand or an argument. A type-free check cannot tell a container's find()
+    from std::string's, so find() counts only with one argument and no string
+    or character literal: string searches usually take a literal or a position.
+    """
+    while tokens and tokens[0] == "(" and group_end(tokens, 0) == len(tokens) - 1:
+        tokens = tokens[1:-1]
+    if not tokens or not IDENTIFIER.fullmatch(tokens[0]):
+        return False
+    callee = [tokens[0]]
+    index = 1
+    while (
+        tokens[index:index + 2] == [":", ":"]
+        and index + 2 < len(tokens)
+        and IDENTIFIER.fullmatch(tokens[index + 2])
+    ):
+        callee.append(tokens[index + 2])
+        index += 3
+    member = False
+    call: tuple[bool, list[str], list[str]] | None = None
+    while index < len(tokens):
+        if tokens[index] in {"(", "["}:
+            end = group_end(tokens, index)
+            if end is None:
+                return False
+            named_call = tokens[index] == "(" and callee
+            call = (member, callee, tokens[index + 1:end]) if named_call else None
+            callee = []
+            index = end + 1
+        elif tokens[index] == "." or tokens[index:index + 2] == ["-", ">"]:
+            index += 1 if tokens[index] == "." else 2
+            if index == len(tokens) or not IDENTIFIER.fullmatch(tokens[index]):
+                return False
+            member, callee, call = True, [tokens[index]], None
+            index += 1
+        else:
+            return False
+    if call is None:
+        return False
+    member, callee, arguments = call
+    if not member:
+        return len(callee) == 2 and callee[0] == "std" and callee[1] in ITERATOR_FUNCTIONS
+    if callee != ["find"]:
+        return callee[0] in ITERATOR_MEMBERS
+    return (
+        bool(arguments)
+        and leading_expression(arguments) == arguments
+        and not any(is_text_literal(token) for token in arguments)
+    )
+
+
+def placeholder_context(tokens: list[str], start: int) -> str:
+    """Say whether the `auto` at tokens[start] begins a declaration statement.
+
+    Returns "statement", "new" for a new-expression, or "other" for
+    parameters, template arguments, trailing return types, and expressions.
+    Only the current line is visible, so a line start counts as a statement.
+    """
+    index = start - 1
+    # A type-constraint such as std::integral or std::convertible_to<int>.
+    if index >= 1 and tokens[index] == ">" and tokens[index - 1] != "-":
+        opening = group_start(tokens, index, "<")
+        if (
+            opening is not None
+            and opening >= 1
+            and IDENTIFIER.fullmatch(tokens[opening - 1])
+            and tokens[opening - 1] not in NOT_CONSTRAINTS
+        ):
+            index = opening - 1
+    if index >= 0 and IDENTIFIER.fullmatch(tokens[index]) and tokens[index] not in NOT_CONSTRAINTS:
+        index -= 1
+        while index >= 1 and tokens[index] == tokens[index - 1] == ":":
+            index -= 2
+            if index < 0 or not IDENTIFIER.fullmatch(tokens[index]):
+                break
+            index -= 1
+    while index >= 0:
+        if tokens[index] in DECL_SPECIFIERS:
+            index -= 1
+        elif tokens[index] == "]" and index >= 1 and tokens[index - 1] == "]":
+            opening = group_start(tokens, index, "[")
+            if opening is None:
+                break
+            index = opening - 1
+        elif tokens[index] == ")":
+            opening = group_start(tokens, index, "(")
+            if opening is None or opening == 0 or tokens[opening - 1] != "alignas":
+                break
+            index = opening - 2
+        else:
+            break
+    if index < 0 or tokens[index] in {";", "{", "}", "else", "do"}:
+        return "statement"
+    previous = tokens[index]
+    if previous == ":" and (index == 0 or tokens[index - 1] != ":"):
+        return "statement"  # a label or access specifier
+    if previous == "new":
+        return "new"
+    if previous == ")":
+        opening = group_start(tokens, index, "(")
+        if opening is not None and opening >= 1 and tokens[opening - 1] == "new":
+            return "new"  # placement new
+    if previous == "(":
+        keyword = index - 1
+        if keyword >= 0 and tokens[keyword] == "constexpr":
+            keyword -= 1
+        if keyword >= 0 and tokens[keyword] in CONDITION_KEYWORDS:
+            return "statement"
+    return "other"
+
+
+def declaration_allowed(tokens: list[str]) -> bool:
+    """Apply the rules to the tokens that follow a declaration's `auto`."""
     index = 0
-    while index < len(tokens):
-        text = tokens[index][0]
-        if text == "[" and index + 1 < len(tokens) and tokens[index + 1][0] == "[":
-            index = hide_group(index, "[", "]")
-        elif text == "alignas" and index + 1 < len(tokens) and tokens[index + 1][0] == "(":
-            code[tokens[index].start():tokens[index].end()] = " " * len(text)
-            index = hide_group(index + 1, "(", ")")
-        elif text == "auto":
-            index += 1
-            break
-        else:
-            index += 1
     parentheses = 0
-    while index < len(tokens):
-        text = tokens[index][0]
-        if text in {"*", "&"} or text in DECL_SPECIFIERS:
-            index += 1
-        elif text == "(":
-            code[tokens[index].start()] = " "
-            parentheses += 1
-            index += 1
-        else:
-            break
-    if index < len(tokens) and re.fullmatch(r"[A-Za-z_]\w*", tokens[index][0]):
+    while index < len(tokens) and (tokens[index] in {"*", "&", "("} or tokens[index] in DECL_SPECIFIERS):
+        parentheses += tokens[index] == "("
         index += 1
-        while index < len(tokens) and tokens[index][0] == ")" and parentheses:
-            code[tokens[index].start()] = " "
-            parentheses -= 1
-            index += 1
-        while index + 1 < len(tokens) and tokens[index][0] == tokens[index + 1][0] == "[":
-            index = hide_group(index, "[", "]")
-    return "".join(code)
+    if index == len(tokens) or not IDENTIFIER.fullmatch(tokens[index]):
+        return True  # a structured binding, or an expression such as auto{x}
+    index += 1
+    while index < len(tokens) and tokens[index] == ")" and parentheses:
+        parentheses -= 1
+        index += 1
+    while tokens[index:index + 2] == ["[", "["]:
+        end = group_end(tokens, index)
+        if end is None:
+            return False
+        index = end + 1
+    following = tokens[index] if index < len(tokens) else None
+    if following in {",", ")"}:
+        return True  # a parameter continued from an earlier line
+    if following == "=":
+        initializer = tokens[index + 1:]
+    elif following in {"(", "{"}:
+        initializer = tokens[index + 1:group_end(tokens, index)]
+    else:
+        return False
+    lambda_allowed = lambda_initializer_allowed(initializer)
+    if lambda_allowed is not None:
+        return lambda_allowed
+    # Every declarator of one auto declaration deduces the same type, so the
+    # first initializer decides.
+    return iterator_call(leading_expression(initializer))
 
 
 def lexical_context(source: str) -> tuple[str, set[int]]:
@@ -203,54 +353,15 @@ def lexical_context(source: str) -> tuple[str, set[int]]:
     return "".join(pieces), opt_out_lines
 
 
-def direct_iterator_return(body: list[str], declaration: str) -> bool:
+def direct_iterator_return(body: list[str]) -> bool:
     # Recognize a single returned iterator call, not incidental calls elsewhere
     # in a body or an iterator comparison whose result is a bool.
-    if not body or body[0] != "return" or body[-1] != ";":
-        return False
-    expression = body[1:-1]
-
-    def closing_paren(tokens: list[str], start: int) -> int | None:
-        depth = 0
-        for index in range(start, len(tokens)):
-            if tokens[index] == "(":
-                depth += 1
-            elif tokens[index] == ")":
-                depth -= 1
-                if depth == 0:
-                    return index
-        return None
-
-    while (
-        expression
-        and expression[0] == "("
-        and closing_paren(expression, 0) == len(expression) - 1
-    ):
-        expression = expression[1:-1]
-    if "(" not in expression:
-        return False
-    opening = expression.index("(")
-    callee = "".join(expression[:opening])
-    if not re.fullmatch(r"(?:[A-Za-z_]\w*(?:::|\.|->))*[A-Za-z_]\w*", callee):
-        return False
-    return (
-        closing_paren(expression, opening) == len(expression) - 1
-        and is_iterator_like(f"{declaration} = {callee}(")
-    )
+    return len(body) > 2 and body[0] == "return" and body[-1] == ";" and iterator_call(body[1:-1])
 
 
-def lambda_initializer_allowed(
-    line: str, source: str | None = None, offset: int = 0
-) -> bool | None:
+def lambda_initializer_allowed(initializer: list[str]) -> bool | None:
     """Return None for another initializer, otherwise apply lambda/iterator rules."""
-    equals = line.find("=")
-    if equals < 0:
-        return None
-    tokens = (
-        token[0]
-        for token in CPP_TOKEN.finditer(source if source is not None else line, offset + equals + 1)
-        if token.lastgroup != "skip"
-    )
+    tokens = iter(initializer)
     first = next(tokens, None)
     parentheses = 0
     while first == "(":
@@ -259,20 +370,18 @@ def lambda_initializer_allowed(
     if first != "[":
         return None
 
-    pairs = {"[": "]", "(": ")", "{": "}"}
-
     def consume_group(opener: str, contents: list[str] | None = None) -> bool:
-        stack = [">" if opener == "<" else pairs[opener]]
+        stack = [">" if opener == "<" else PAIRS[opener]]
         for token in tokens:
-            if token in pairs:
-                stack.append(pairs[token])
+            if token in PAIRS:
+                stack.append(PAIRS[token])
             elif token == "<" and stack[-1] == ">":
                 stack.append(">")
             elif token == ">" and stack[-1] == ">":
                 stack.pop()
                 if not stack:
                     return True
-            elif token in pairs.values():
+            elif token in PAIRS.values():
                 if token != stack.pop():
                     return False
                 if not stack:
@@ -316,7 +425,7 @@ def lambda_initializer_allowed(
                     break
             if parentheses or following not in {None, ";", ",", ")", "}"}:
                 return False
-            return not invoked or direct_iterator_return(body, line.partition("=")[0])
+            return not invoked or direct_iterator_return(body)
         if token in {"(", "["} or (first_header_token and token == "<"):
             if not consume_group(token):
                 return False
@@ -327,27 +436,24 @@ def lambda_initializer_allowed(
     return False
 
 
-def is_iterator_like(line: str) -> bool:
-    return any(hint in line for hint in ITERATOR_HINTS)
-
-
-def is_allowed_auto(
-    line: str, source: str | None = None, offset: int = 0, *, auto_ok: bool = False
-) -> bool:
-    line = declaration_code(line)
-    stripped = line.strip()
-    if auto_ok:
-        return True
-    if not DECLARATION_AUTO.search(stripped):
-        return True
-    if STRUCTURED_BINDING.search(stripped.partition("=")[0]):
-        return True
-    lambda_allowed = lambda_initializer_allowed(line, source, offset)
-    if lambda_allowed is not None:
-        return lambda_allowed
-    if is_iterator_like(stripped):
-        return True
-    return False
+def line_allowed(code_line: str, source: str, line_offset: int) -> bool:
+    """Check every `auto` on a line whose literals and comments are blanked."""
+    matches = list(CPP_TOKEN.finditer(code_line))
+    tokens = [match[0] for match in matches]
+    for index, token in enumerate(tokens):
+        if token != "auto":
+            continue
+        start = end = index
+        if index >= 2 and tokens[index - 2:index] == ["decltype", "("] and tokens[index + 1:index + 2] == [")"]:
+            start, end = index - 2, index + 1
+        context = placeholder_context(tokens, start)
+        if context == "new":
+            return False
+        if context == "statement" and not declaration_allowed(
+            statement_tokens(source, line_offset + matches[end].end())
+        ):
+            return False
+    return True
 
 
 def matches_allowlist(relative_path: str, line: str, rules: list[AllowRule]) -> bool:
@@ -371,7 +477,7 @@ def collect_violations(repo_root: Path, allowlist: list[AllowRule]) -> list[Viol
             code_line = code[line_offset:line_offset + len(line)]
             if not WORD_AUTO.search(code_line):
                 continue
-            if is_allowed_auto(code_line, source, line_offset, auto_ok=line_number in opt_out_lines):
+            if line_number in opt_out_lines or line_allowed(code_line, source, line_offset):
                 continue
             if matches_allowlist(relative_path, line, allowlist):
                 continue
