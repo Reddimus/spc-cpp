@@ -200,12 +200,29 @@ bool has_case(std::string_view fixture) {
 							   [fixture](const GoldenCase& c) { return c.fixture == fixture; });
 }
 
+/// Regular files under `root`, named by their path relative to it, as
+/// tools/verify_fixture_checksums.py names them. Dotfiles such as a Finder
+/// .DS_Store and dot-directories are skipped.
+std::vector<std::string> files_under(const std::filesystem::path& root) {
+	std::vector<std::string> names;
+	for (std::filesystem::recursive_directory_iterator it{root};
+		 it != std::filesystem::recursive_directory_iterator{}; ++it) {
+		if (it->path().filename().string().starts_with('.')) {
+			if (it->is_directory()) {
+				it.disable_recursion_pending();
+			}
+			continue;
+		}
+		if (it->is_regular_file()) {
+			names.push_back(std::filesystem::relative(it->path(), root).generic_string());
+		}
+	}
+	return names;
+}
+
 TEST(GoldenCoverage, EveryFixtureIsParsedOrListedAsNotParsed) {
-	for (const std::filesystem::directory_entry& entry :
-		 std::filesystem::directory_iterator(SPC_FIXTURES_DIR)) {
-		const std::string name = entry.path().filename().string();
-		// Dotfiles such as a Finder .DS_Store are not fixtures.
-		if (name == "README.md" || name == "SHA256SUMS" || name.starts_with('.')) {
+	for (const std::string& name : files_under(SPC_FIXTURES_DIR)) {
+		if (name == "README.md" || name == "SHA256SUMS") {
 			continue;
 		}
 		EXPECT_TRUE(has_case(name) || std::ranges::find(kNotParsed, name) != kNotParsed.end())
@@ -218,12 +235,7 @@ TEST(GoldenCoverage, EveryFixtureIsParsedOrListedAsNotParsed) {
 }
 
 TEST(GoldenCoverage, EveryGoldenFileHasACase) {
-	for (const std::filesystem::directory_entry& entry :
-		 std::filesystem::directory_iterator(SPC_GOLDEN_DIR)) {
-		const std::string name = entry.path().filename().string();
-		if (name.starts_with('.')) {
-			continue; // .DS_Store and editor files
-		}
+	for (const std::string& name : files_under(SPC_GOLDEN_DIR)) {
 		EXPECT_TRUE(name.ends_with(".txt") && has_case(name.substr(0, name.size() - 4)))
 			<< name << " has no golden case; delete it";
 	}

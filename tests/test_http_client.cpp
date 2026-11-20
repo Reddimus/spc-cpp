@@ -183,7 +183,25 @@ TEST(HttpClient, AbsoluteHttpsSchemesNeverUseThePlaintextBaseUrl) {
 	// plaintext base and succeeds, exposing an HTTPS request as an HTTP path.
 	EXPECT_FALSE(client.get("HTTPS://127.0.0.1:0/absolute"));
 	EXPECT_FALSE(client.get("hTtPs://127.0.0.1:0/absolute"));
+	// libcurl also fetches a one-slash https URL over TLS.
+	EXPECT_FALSE(client.get("hTtPs:/127.0.0.1:0/absolute"));
 	EXPECT_TRUE(server.requests().empty());
+}
+
+TEST(HttpClient, AOneSlashHttpUrlBypassesTheBaseUrl) {
+	LoopbackServer base{[](const LoopbackRequest&) { return http_response("200 OK", "base"); }};
+	LoopbackServer other{[](const LoopbackRequest&) { return http_response("200 OK", "other"); }};
+	ClientConfig config;
+	config.base_url = base.url("/base/");
+	const HttpClient client{config};
+	const std::string one_slash =
+		"http:/" + other.url("/x").substr(std::string_view{"http://"}.size());
+
+	const Result<HttpResponse> response = client.get(one_slash);
+
+	ASSERT_TRUE(response) << response.error().message;
+	EXPECT_EQ(response->body, "other");
+	EXPECT_TRUE(base.requests().empty());
 }
 
 TEST(HttpClient, RejectsInvalidTimeoutsBeforeSendingARequest) {

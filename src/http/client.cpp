@@ -80,15 +80,17 @@ std::size_t write_body(char* data, std::size_t size, std::size_t count, void* us
 	return chunk;
 }
 
-bool is_absolute_url(std::string_view path) {
-	return (path.size() >= 7 && curl_strnequal(path.data(), "http://", 7) != 0) ||
-		   (path.size() >= 8 && curl_strnequal(path.data(), "https://", 8) != 0);
-}
-
 /// Whether libcurl fetches `url` over TLS. It ignores the scheme's case and
 /// takes one to three slashes after it, so this matches the first slash only.
 bool is_https_url(std::string_view url) {
 	return url.size() >= 7 && curl_strnequal(url.data(), "https:/", 7) != 0;
+}
+
+/// Whether `path` names its own HTTP(S) scheme, by the same rule as libcurl;
+/// otherwise a one-slash "https:/host" would be appended to a plaintext base.
+bool is_absolute_url(std::string_view path) {
+	return (path.size() >= 6 && curl_strnequal(path.data(), "http:/", 6) != 0) ||
+		   is_https_url(path);
 }
 
 /// libcurl's process-wide state. Each client holds a shared reference, so the

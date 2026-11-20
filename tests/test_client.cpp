@@ -921,6 +921,15 @@ TEST(ArcGISClientRouting, RejectsNonJsonFormatsBeforeNetworkAccess) {
 	EXPECT_TRUE(transport->requests.empty());
 }
 
+TEST(ClientErrors, AnOversizedErrorBodyIsNotParsed) {
+	const std::string small = R"({"error":{"code":500,"message":"Busy"}})";
+	std::string big = R"({"error":{"code":500,"message":"Busy","pad":")";
+	big += std::string(70 * 1024, 'x') + R"("}})";
+
+	EXPECT_EQ(Error::from_response(500, small).message, "Busy");
+	EXPECT_EQ(Error::from_response(500, big).message, big.substr(0, 256));
+}
+
 TEST(ClientErrors, OnlyStatuses500To599AreServerErrors) {
 	EXPECT_EQ(Error::from_response(500, "").code, ErrorCode::ServerError);
 	EXPECT_EQ(Error::from_response(599, "").code, ErrorCode::ServerError);

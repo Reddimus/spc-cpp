@@ -10,6 +10,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - An HTTPS request no longer follows a redirect to plain HTTP; it fails with
   `InvalidRequest`.
+- A one-slash URL such as `https:/host/x`, which libcurl fetches as absolute, is
+  no longer appended to `ClientConfig::base_url` and sent to that host instead.
 - Bound memory across all pages of an ArcGIS call. One Web Mercator expansion
   budget covers the whole call, both fire-weather layers included, and the pages
   together may not exceed `ClientConfig::max_response_bytes` (`InvalidRequest`).
@@ -38,6 +40,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Initialize `HttpResponse::status_code` to 0.
 - A `std::exception` inside any client call, `std::bad_alloc` included, returns
   `ParseError` instead of escaping from ArcGIS calls.
+- Error bodies over 64 KiB are not parsed for their message; the message is the
+  start of the body.
 - Skip features whose fields are not an object, conditional-intensity polygons
   without a label, and day 1-2 fire-weather polygons with no known `dn` band.
 - Read the numeric strings `"nan"` and `"inf"` as 0 instead of passing them on.
