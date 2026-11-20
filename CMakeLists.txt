@@ -123,12 +123,13 @@ endif()
 
 add_subdirectory(src)
 
+# The test and benchmark frameworks are pinned by commit, so a moved tag cannot
+# change what runs. GIT_SHALLOW does not work with a hash; both clones are small.
 if(SPC_BUILD_TESTS)
     FetchContent_Declare(
         googletest
         GIT_REPOSITORY https://github.com/google/googletest.git
-        GIT_TAG v1.18.0
-        GIT_SHALLOW TRUE
+        GIT_TAG 063de7e9578f82b369302001269680b4b1553359 # v1.18.0
     )
     set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
     set(INSTALL_GTEST OFF CACHE BOOL "" FORCE)
@@ -141,8 +142,7 @@ if(SPC_BUILD_BENCHMARKS)
     FetchContent_Declare(
         benchmark
         GIT_REPOSITORY https://github.com/google/benchmark.git
-        GIT_TAG v1.9.5
-        GIT_SHALLOW TRUE
+        GIT_TAG 192ef10025eb2c4cdd392bc502f0c852196baa48 # v1.9.5
         SYSTEM
         EXCLUDE_FROM_ALL
     )
