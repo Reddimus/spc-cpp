@@ -53,7 +53,7 @@ Error Error::from_response(int status, const std::string& body, Feed404 semantic
 		err.code = ErrorCode::InvalidRequest;
 	} else if (status == 429 || status == 503) {
 		err.code = ErrorCode::RateLimited;
-	} else if (status >= 500) {
+	} else if (status >= 500 && status <= 599) {
 		err.code = ErrorCode::ServerError;
 	} else {
 		err.code = ErrorCode::Unknown;

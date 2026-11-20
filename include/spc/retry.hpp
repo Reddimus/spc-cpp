@@ -104,15 +104,21 @@ struct RetryPolicy {
 		}
 		value.remove_prefix(start);
 		value.remove_suffix(value.size() - value.find_last_not_of(" \t") - 1);
+		// Cap before converting so a huge value cannot overflow.
+		constexpr std::int64_t kMaxSeconds = std::int64_t{365} * 24 * 60 * 60;
 		std::int64_t seconds = 0;
 		const std::from_chars_result parsed =
 			std::from_chars(value.data(), value.data() + value.size(), seconds);
-		if (parsed.ec == std::errc{} && parsed.ptr == value.data() + value.size() && seconds > 0) {
-			// Cap before converting so a huge value cannot overflow.
-			constexpr std::int64_t kMaxSeconds = std::int64_t{365} * 24 * 60 * 60;
-			return std::chrono::milliseconds{std::min(seconds, kMaxSeconds) * 1000};
+		if (parsed.ptr != value.data() + value.size()) {
+			return std::chrono::milliseconds{0};
 		}
-		return std::chrono::milliseconds{0};
+		// Digits too many for int64 still ask for the longest wait.
+		if (parsed.ec == std::errc::result_out_of_range && value.front() != '-') {
+			seconds = kMaxSeconds;
+		} else if (parsed.ec != std::errc{} || seconds <= 0) {
+			return std::chrono::milliseconds{0};
+		}
+		return std::chrono::milliseconds{std::min(seconds, kMaxSeconds) * 1000};
 	}
 	return std::chrono::milliseconds{0};
 }

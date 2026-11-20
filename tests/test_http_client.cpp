@@ -3,6 +3,7 @@
 /// headers, scheme restrictions, and concurrent use.
 
 #include "spc/http_client.hpp"
+#include "spc/retry.hpp"
 #include "support/loopback_server.hpp"
 
 #include <atomic>
@@ -11,10 +12,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <curl/curl.h>
 #include <gtest/gtest.h>
 #include <limits>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -54,6 +57,40 @@ std::string chunked_response(std::size_t chunks, std::size_t chunk_size) {
 		response += size_line + chunk + "\r\n";
 	}
 	return response + "0\r\n\r\n";
+}
+
+void append_le32(std::string& out, std::uint32_t value) {
+	for (int shift = 0; shift < 32; shift += 8) {
+		out += static_cast<char>((value >> shift) & 0xFFU);
+	}
+}
+
+std::uint32_t crc32(std::string_view data) {
+	std::uint32_t crc = 0xFFFFFFFFU;
+	for (const char c : data) {
+		crc ^= static_cast<unsigned char>(c);
+		for (int bit = 0; bit < 8; ++bit) {
+			crc = (crc >> 1) ^ (0xEDB88320U & (0U - (crc & 1U)));
+		}
+	}
+	return ~crc;
+}
+
+/// `data` as gzip with one stored deflate block, so the encoded body is 23
+/// bytes longer than the decoded one.
+std::string gzip_stored(std::string_view data) {
+	std::string out{"\x1f\x8b\x08\x00\x00\x00\x00\x00\x00\xff", 10};
+	const std::uint16_t size = static_cast<std::uint16_t>(data.size());
+	const std::uint16_t inverse = static_cast<std::uint16_t>(~size);
+	out += '\x01'; // final block, stored
+	out += static_cast<char>(size & 0xFFU);
+	out += static_cast<char>(size >> 8);
+	out += static_cast<char>(inverse & 0xFFU);
+	out += static_cast<char>(inverse >> 8);
+	out += data;
+	append_le32(out, crc32(data));
+	append_le32(out, static_cast<std::uint32_t>(data.size()));
+	return out;
 }
 
 TEST(LoopbackServer, ShutdownIsBoundedWhenAClientStopsReading) {
@@ -215,6 +252,72 @@ TEST(HttpClient, RejectsAChunkedBodyThatGrowsPastTheLimit) {
 	EXPECT_NE(response.error().message.find("max_response_bytes"), std::string::npos);
 }
 
+TEST(HttpClient, IgnoresTheSizeOfARedirectBodyItDiscards) {
+	// The chunked final response has no length of its own, so the hop's must
+	// not carry over to it.
+	LoopbackServer server{[](const LoopbackRequest& request) {
+		if (request.target == "/start") {
+			return http_response("302 Found", "REDIRECT-BODY", "Location: /final\r\n");
+		}
+		if (request.target == "/start-chunked") {
+			return http_response("302 Found", "REDIRECT-BODY", "Location: /final-chunked\r\n");
+		}
+		if (request.target == "/final-chunked") {
+			return chunked_response(1, 2);
+		}
+		return http_response("200 OK", "OK");
+	}};
+	ClientConfig config;
+	config.max_response_bytes = 8;
+	const HttpClient client{config};
+
+	const Result<HttpResponse> sized = client.get(server.url("/start"));
+	const Result<HttpResponse> chunked = client.get(server.url("/start-chunked"));
+
+	ASSERT_TRUE(sized) << sized.error().message;
+	EXPECT_EQ(sized->status_code, 200);
+	EXPECT_EQ(sized->body, "OK");
+	ASSERT_TRUE(chunked) << chunked.error().message;
+	EXPECT_EQ(chunked->body, "xx");
+}
+
+TEST(HttpClient, RefusesAnAdvertisedOversizeBodyBeforeReadingIt) {
+	// The server stops after 10 bytes. Reading on would end in a partial-body
+	// NetworkError, which with_retry would retry.
+	LoopbackServer server{[](const LoopbackRequest&) {
+		return std::string{"HTTP/1.1 200 OK\r\nContent-Length: 1048576\r\n"
+						   "Connection: close\r\n\r\n0123456789"};
+	}};
+	ClientConfig config;
+	config.max_response_bytes = 1024;
+	const HttpClient client{config};
+
+	const Result<HttpResponse> response = client.get(server.url("/big"));
+
+	ASSERT_FALSE(response);
+	EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest);
+	EXPECT_NE(response.error().message.find("max_response_bytes"), std::string::npos);
+}
+
+TEST(HttpClient, LimitsTheDecodedBodyNotTheEncodedOne) {
+	if ((curl_version_info(CURLVERSION_NOW)->features & CURL_VERSION_LIBZ) == 0) {
+		GTEST_SKIP() << "libcurl was built without gzip support";
+	}
+	const std::string body(64, 'x');
+	const std::string encoded = gzip_stored(body);
+	LoopbackServer server{[&encoded](const LoopbackRequest&) {
+		return http_response("200 OK", encoded, "Content-Encoding: gzip\r\n");
+	}};
+	ClientConfig config;
+	config.max_response_bytes = 80; // between the decoded 64 and the encoded 87
+	const HttpClient client{config};
+
+	const Result<HttpResponse> response = client.get(server.url("/gzip"));
+
+	ASSERT_TRUE(response) << response.error().message;
+	EXPECT_EQ(response->body, body);
+}
+
 TEST(HttpClient, RefusesEverySchemeOtherThanHttpAndHttps) {
 	// file:// would otherwise read the local file and return it as the body.
 	const HttpClient client;
@@ -222,7 +325,17 @@ TEST(HttpClient, RefusesEverySchemeOtherThanHttpAndHttps) {
 	const Result<HttpResponse> result = client.get("file:///etc/hosts");
 
 	ASSERT_FALSE(result) << "file:// must not be fetched";
-	EXPECT_EQ(result.error().code, ErrorCode::NetworkError);
+	// Not NetworkError, which with_retry would retry.
+	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
+}
+
+TEST(HttpClient, AMalformedUrlIsAnInvalidRequest) {
+	const HttpClient client;
+
+	const Result<HttpResponse> result = client.get("http://bad host/");
+
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
 }
 
 TEST(HttpClient, RefusesARedirectToAnotherScheme) {
@@ -234,7 +347,21 @@ TEST(HttpClient, RefusesARedirectToAnotherScheme) {
 	const Result<HttpResponse> response = client.get(server.url("/escape"));
 
 	ASSERT_FALSE(response);
-	EXPECT_EQ(response.error().code, ErrorCode::NetworkError);
+	EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest);
+}
+
+TEST(HttpClient, ARedirectLoopIsAServerErrorThatIsNotRetried) {
+	LoopbackServer server{[](const LoopbackRequest&) {
+		return http_response("302 Found", "", "Location: /loop\r\n");
+	}};
+	const HttpClient client;
+
+	const Result<HttpResponse> response = client.get(server.url("/loop"));
+
+	ASSERT_FALSE(response);
+	EXPECT_EQ(response.error().code, ErrorCode::ServerError);
+	EXPECT_FALSE(should_retry(response.error(), RetryPolicy{}));
+	EXPECT_EQ(server.requests().size(), 11U); // the first request and 10 redirects
 }
 
 TEST(HttpClient, ReusedHandlesKeepTheSchemeRestriction) {
@@ -286,6 +413,8 @@ TEST(HttpClient, AMovedFromClientReportsAnErrorInsteadOfCrashing) {
 	ASSERT_FALSE(response);
 	EXPECT_EQ(response.error().code, ErrorCode::InvalidRequest);
 	EXPECT_TRUE(moved.config().verify_ssl);
+	// NOLINTNEXTLINE(bugprone-use-after-move,clang-analyzer-cplusplus.Move)
+	EXPECT_EQ(original.config().max_response_bytes, ClientConfig{}.max_response_bytes);
 }
 
 } // namespace

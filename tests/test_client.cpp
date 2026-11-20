@@ -514,6 +514,12 @@ TEST(ArcGISClientRouting, RejectsNonJsonFormatsBeforeNetworkAccess) {
 	EXPECT_TRUE(transport->requests.empty());
 }
 
+TEST(ClientErrors, OnlyStatuses500To599AreServerErrors) {
+	EXPECT_EQ(Error::from_response(500, "").code, ErrorCode::ServerError);
+	EXPECT_EQ(Error::from_response(599, "").code, ErrorCode::ServerError);
+	EXPECT_EQ(Error::from_response(600, "").code, ErrorCode::Unknown);
+}
+
 TEST(ClientErrors, AMalformedBodyIsAParseErrorNotAnException) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	transport->responses = {{200, "<html>maintenance</html>", {}},

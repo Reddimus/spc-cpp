@@ -6,6 +6,21 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- Report a malformed URL or a scheme other than HTTP(S) as `InvalidRequest`, and a
+  redirect loop as `ServerError`. `with_retry` no longer repeats them.
+- Map only HTTP 500-599 to `ServerError`; a status above 599 is `Unknown`.
+
+### Fixed
+
+- Apply `ClientConfig::max_response_bytes` to the final response's decoded body. A
+  redirect hop's `Content-Length`, or a compressed length over the limit, no longer
+  fails a request whose body fits.
+- Cap a `Retry-After` too large for int64 at the longest wait instead of ignoring it.
+- Reset the daily quota when the clock steps back across midnight.
+- Initialize `HttpResponse::status_code` to 0.
+
 ## [0.4.7] - 2026-11-04
 
 ### Fixed

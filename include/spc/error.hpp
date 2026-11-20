@@ -17,7 +17,8 @@ enum class ErrorCode {
 	NetworkError,
 	/// HTTP 429 or 503, or the SDK's own rate limit.
 	RateLimited,
-	/// HTTP 5xx other than 503, or an ArcGIS query that never finished paging.
+	/// HTTP 500-599 other than 503, a redirect loop, or an ArcGIS query that
+	/// never finished paging.
 	ServerError,
 	/// A URL or ArcGIS service that no longer exists: a bug to report. A bad
 	/// layer id is `InvalidRequest`.
@@ -27,9 +28,10 @@ enum class ErrorCode {
 	/// so treat it as "no data", not as a failure. Only `StaticFeedClient`
 	/// returns it.
 	FeedUnavailable,
-	/// The request cannot succeed as asked: an unsupported day or hazard,
-	/// HTTP 400, an ArcGIS error such as an invalid parameter, or a response
-	/// larger than `ClientConfig::max_response_bytes`.
+	/// The request cannot succeed as asked: an unsupported day or hazard, a
+	/// malformed URL or one that is not HTTP(S), HTTP 400, an ArcGIS error such
+	/// as an invalid parameter, or a response larger than
+	/// `ClientConfig::max_response_bytes`.
 	InvalidRequest,
 	/// The body was not valid JSON. Valid JSON without the expected fields
 	/// parses to an empty result.

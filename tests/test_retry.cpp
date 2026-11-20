@@ -126,6 +126,16 @@ TEST(Retry, AHugeRetryAfterIsCappedInsteadOfOverflowing) {
 	EXPECT_LE(delay, std::chrono::hours{24 * 365});
 }
 
+TEST(Retry, ARetryAfterBeyondInt64IsCappedLikeAnyHugeValue) {
+	const HttpResponse fits{429, "", {{"Retry-After", "9223372036854775807"}}};
+	const HttpResponse too_big{429, "", {{"Retry-After", "99999999999999999999"}}};
+	const HttpResponse negative{429, "", {{"Retry-After", "-99999999999999999999"}}};
+
+	EXPECT_EQ(retry_after(too_big), retry_after(fits));
+	EXPECT_EQ(retry_after(fits), std::chrono::hours{24 * 365});
+	EXPECT_EQ(retry_after(negative).count(), 0);
+}
+
 TEST(Retry, IgnoresAnUnparseableRetryAfterAndFallsBackToTheBackoff) {
 	RetryPolicy policy;
 	policy.max_attempts = 2;

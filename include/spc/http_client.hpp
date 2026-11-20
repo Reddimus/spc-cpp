@@ -20,7 +20,7 @@ namespace spc {
 /// An HTTP response. Any status code is a successful transfer; the clients
 /// decide what a non-200 status means.
 struct HttpResponse {
-	std::int16_t status_code;
+	std::int16_t status_code{0};
 	std::string body;
 	/// Headers of the final response, after redirects.
 	std::vector<std::pair<std::string, std::string>> headers;
@@ -36,9 +36,10 @@ struct ClientConfig {
 	/// supported libcurl versions. Invalid values fail before sending.
 	std::chrono::seconds timeout{15};
 	bool verify_ssl{true};
-	/// Largest response body accepted. Bodies are held in memory and parsed
-	/// whole, and an IEM date range can be arbitrarily large. A bigger
-	/// response fails with `ErrorCode::InvalidRequest` and is not retried.
+	/// Largest decoded body accepted from the final response; 0 means no
+	/// limit. Bodies are held in memory and parsed whole, and an IEM date
+	/// range can be arbitrarily large. A bigger response fails with
+	/// `ErrorCode::InvalidRequest` and is not retried.
 	std::size_t max_response_bytes{64UL * 1024UL * 1024UL};
 };
 
