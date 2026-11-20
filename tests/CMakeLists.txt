@@ -26,7 +26,7 @@ target_include_directories(spc_tests PRIVATE
     ${PROJECT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}
 )
-target_include_directories(spc_tests SYSTEM PRIVATE ${glaze_SOURCE_DIR}/include)
+target_link_libraries(spc_tests PRIVATE glaze::glaze)
 target_compile_definitions(spc_tests PRIVATE
     SPC_FIXTURES_DIR="${CMAKE_CURRENT_SOURCE_DIR}/fixtures"
     SPC_GOLDEN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/golden"

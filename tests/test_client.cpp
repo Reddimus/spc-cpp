@@ -171,6 +171,49 @@ TEST(ArcGISClientRouting, CombinesBothPublishedFireWeatherLayers) {
 	EXPECT_NE(transport->requests[1].find("outSR=4326"), std::string::npos);
 }
 
+TEST(ArcGISClientRouting, TypedQueriesUseTheirOwnMapServers) {
+	// Layer ids alone still match when a query goes to the wrong MapServer.
+	const std::string services = "https://mapservices.weather.noaa.gov/vector/rest/services/";
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses.assign(5, empty_feature_collection());
+	ArcGISClient client{transport};
+
+	ASSERT_TRUE(client.query_categorical(1));
+	ASSERT_TRUE(client.query_fire_weather(1));
+	ASSERT_TRUE(client.query_active_md());
+	ASSERT_TRUE(client.query_day4_8(4));
+
+	ASSERT_EQ(transport->requests.size(), 5u);
+	EXPECT_TRUE(transport->requests[0].starts_with(services + "outlooks/SPC_wx_outlks/MapServer/"));
+	EXPECT_TRUE(
+		transport->requests[1].starts_with(services + "fire_weather/SPC_firewx/MapServer/"));
+	EXPECT_TRUE(
+		transport->requests[2].starts_with(services + "fire_weather/SPC_firewx/MapServer/"));
+	EXPECT_TRUE(transport->requests[3].starts_with(
+		services + "outlooks/spc_mesoscale_discussion/MapServer/0/query?"));
+	EXPECT_TRUE(transport->requests[4].starts_with(services + "outlooks/SPC_wx_outlks/MapServer/"));
+}
+
+TEST(StaticFeedRouting, EachProductUsesItsPublishedFile) {
+	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
+	transport->responses.assign(4, {200, R"({"type":"FeatureCollection","features":[]})", {}});
+	StaticFeedClient client{transport};
+
+	ASSERT_TRUE(client.day_categorical(2));
+	ASSERT_TRUE(client.day_probabilistic(1, "tornado"));
+	ASSERT_TRUE(client.day_probabilistic(3, "severe"));
+	ASSERT_TRUE(client.day4_8(5));
+
+	const std::string outlook = "https://www.spc.noaa.gov/products/outlook/";
+	EXPECT_EQ(transport->requests, (std::vector<std::string>{
+									   outlook + "day2otlk_cat.nolyr.geojson",
+									   outlook + "day1otlk_torn.nolyr.geojson",
+									   outlook + "day3otlk_prob.nolyr.geojson",
+									   "https://www.spc.noaa.gov/products/exper/day4-8/"
+									   "day5prob.nolyr.geojson",
+								   }));
+}
+
 TEST(ArcGISClientRouting, PreservesLabelsFromBothDayOneFireProducts) {
 	std::shared_ptr<RecordingTransport> transport = std::make_shared<RecordingTransport>();
 	const std::string body = R"({"features":[

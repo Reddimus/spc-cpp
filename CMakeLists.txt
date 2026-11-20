@@ -114,6 +114,12 @@ FetchContent_Declare(
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(glaze)
+# Glaze's headers are system headers wherever it is linked, so its warnings
+# never reach -Werror or clang-tidy. An installed (imported) Glaze already is.
+get_target_property(SPC_GLAZE_TARGET glaze::glaze ALIASED_TARGET)
+if(SPC_GLAZE_TARGET)
+    set_property(TARGET ${SPC_GLAZE_TARGET} PROPERTY SYSTEM TRUE)
+endif()
 
 add_subdirectory(src)
 
@@ -162,12 +168,15 @@ if(SPC_INSTALL)
         INCLUDES DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
     )
     install(DIRECTORY include/spc DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
-    # The static libraries contain compiled Glaze code, so ship its license.
     install(FILES LICENSE DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp)
-    install(FILES ${glaze_SOURCE_DIR}/LICENSE
-        DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp
-        RENAME glaze-LICENSE
-    )
+    # The static libraries contain compiled Glaze code, so ship its license.
+    # A packaged Glaze, found instead of fetched, ships its own.
+    if(glaze_SOURCE_DIR)
+        install(FILES ${glaze_SOURCE_DIR}/LICENSE
+            DESTINATION ${CMAKE_INSTALL_DATADIR}/licenses/spc-cpp
+            RENAME glaze-LICENSE
+        )
+    endif()
 
     configure_package_config_file(
         ${PROJECT_SOURCE_DIR}/cmake/spcConfig.cmake.in

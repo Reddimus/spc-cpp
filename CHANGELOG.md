@@ -25,6 +25,10 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Read the numeric strings `"nan"` and `"inf"` as 0 instead of passing them on.
 - Fall back to `wkid` when `latestWkid` is null or not a number, and ignore a null
   geometry `spatialReference`.
+- Link Glaze through its target, so a build that finds an installed Glaze
+  (`FETCHCONTENT_TRY_FIND_PACKAGE_MODE`) configures and installs, and MSVC gets the
+  options Glaze requires.
+- The benchmarks' allocation-counter self-check no longer fails on MSVC.
 
 ## [0.4.7] - 2026-11-04
 

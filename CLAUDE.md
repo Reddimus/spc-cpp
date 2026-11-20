@@ -21,9 +21,9 @@ when you touch ArcGIS layer ids; it needs the network.
 - Public failures return `Result<T>` (`std::expected<T, Error>`). The standalone
   `parse_*` functions throw `std::runtime_error` on malformed JSON; the clients
   turn that into `ErrorCode::ParseError`.
-- Glaze is private. It lives behind `src/models/json.hpp`, and no header under
-  `include/` may include it; `tools/test_consumers.sh` fails if an install
-  ships Glaze headers.
+- Glaze is private: only `src/` includes it, mostly through
+  `src/models/json.hpp`. No header under `include/` may include it;
+  `tools/test_consumers.sh` fails if an install ships Glaze headers.
 - `HttpClient` is thread-safe through a pool of libcurl handles. Custom
   transports implement `HttpTransport::get`, which must be safe to call
   concurrently.

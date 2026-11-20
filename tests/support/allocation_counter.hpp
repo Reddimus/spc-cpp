@@ -17,7 +17,8 @@ struct AllocationStats {
 	std::uint64_t allocations = 0; ///< operator new calls
 	std::uint64_t bytes = 0;	   ///< bytes those calls asked for
 	/// Most memory live at once. Live sizes are the allocator's block sizes,
-	/// because an unsized delete does not say how much it frees.
+	/// because an unsized delete does not say how much it frees. Freeing memory
+	/// allocated before the probe lowers the count, so this is then a lower bound.
 	std::uint64_t peak_bytes = 0;
 	/// Memory still live: what the measured code kept. Negative when it
 	/// freed memory allocated before the probe.

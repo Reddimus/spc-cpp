@@ -1,11 +1,12 @@
 # Static libraries: spc_core -> spc_http -> spc_models -> spc_api, and the
 # spc umbrella that links them all.
 #
-# Glaze is added as a SYSTEM PRIVATE include directory rather than linked:
-# no installed header uses it, and a linked glaze::glaze would have to join
-# the export set.
+# Glaze is linked privately and only inside this build: no installed header
+# uses it, and BUILD_LOCAL_INTERFACE keeps it out of the export set. Linking
+# the target, not its include path, also works with a packaged Glaze and
+# carries the MSVC options Glaze requires.
 
-set(SPC_GLAZE_INCLUDE_DIR ${glaze_SOURCE_DIR}/include)
+set(SPC_GLAZE $<BUILD_LOCAL_INTERFACE:glaze::glaze>)
 
 add_library(spc_core STATIC
     core/error.cpp
@@ -20,7 +21,7 @@ target_include_directories(spc_core PUBLIC
     $<BUILD_INTERFACE:${PROJECT_SOURCE_DIR}/include>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
 )
-target_include_directories(spc_core SYSTEM PRIVATE ${SPC_GLAZE_INCLUDE_DIR})
+target_link_libraries(spc_core PRIVATE ${SPC_GLAZE})
 
 add_library(spc_http STATIC
     http/client.cpp
@@ -40,7 +41,7 @@ add_library(spc_models STATIC
 spc_configure_target(spc_models)
 target_link_libraries(spc_models PUBLIC spc_core)
 target_include_directories(spc_models PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(spc_models SYSTEM PRIVATE ${SPC_GLAZE_INCLUDE_DIR})
+target_link_libraries(spc_models PRIVATE ${SPC_GLAZE})
 
 add_library(spc_api STATIC
     api/client.cpp
@@ -48,7 +49,7 @@ add_library(spc_api STATIC
 spc_configure_target(spc_api)
 target_link_libraries(spc_api PUBLIC spc_core spc_http spc_models)
 target_include_directories(spc_api PRIVATE ${PROJECT_SOURCE_DIR}/src)
-target_include_directories(spc_api SYSTEM PRIVATE ${SPC_GLAZE_INCLUDE_DIR})
+target_link_libraries(spc_api PRIVATE ${SPC_GLAZE})
 
 add_library(spc INTERFACE)
 target_link_libraries(spc INTERFACE spc_core spc_http spc_models spc_api)
