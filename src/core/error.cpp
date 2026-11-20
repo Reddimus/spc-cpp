@@ -12,7 +12,7 @@ namespace {
 
 /// Error bodies are small; a bigger one is not parsed, so an error never
 /// holds a JSON tree several times the size of a body as large as the limit.
-constexpr std::size_t kMaxParsedErrorBody = 64 * 1024;
+constexpr std::size_t kMaxParsedErrorBody = std::size_t{64} * 1024;
 
 /// Use the ArcGIS error message when the body is JSON; otherwise keep the start
 /// of the raw body, such as SPC's HTML 404 page.
