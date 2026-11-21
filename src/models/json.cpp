@@ -160,7 +160,8 @@ std::string spc_ts_to_iso8601(std::string_view spc_ts) {
 			return std::string{spc_ts};
 		}
 	}
-	// Twelve digits are not yet a time: month 13 or February 30 stays as is.
+	// Twelve digits are not yet a time: month 13, February 30, or year 0 (the
+	// civil calendar has none, and Postgres rejects it) stays as is.
 	const auto digits = [spc_ts](std::size_t at, std::size_t count) {
 		unsigned value = 0;
 		for (std::size_t i = at; i < at + count; ++i) {
@@ -171,7 +172,7 @@ std::string spc_ts_to_iso8601(std::string_view spc_ts) {
 	const std::chrono::year_month_day date{std::chrono::year{static_cast<int>(digits(0, 4))},
 										   std::chrono::month{digits(4, 2)},
 										   std::chrono::day{digits(6, 2)}};
-	if (!date.ok() || digits(8, 2) > 23 || digits(10, 2) > 59) {
+	if (digits(0, 4) == 0 || !date.ok() || digits(8, 2) > 23 || digits(10, 2) > 59) {
 		return std::string{spc_ts};
 	}
 	return std::format("{}-{}-{}T{}:{}:00Z", spc_ts.substr(0, 4), spc_ts.substr(4, 2),

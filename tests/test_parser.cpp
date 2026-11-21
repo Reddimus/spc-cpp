@@ -188,8 +188,8 @@ TEST(Parser, NumericStringsMustBeWholeNumbers) {
 	EXPECT_EQ(watches.watches[0].number, 0);
 	EXPECT_EQ(watches.watches[1].number, 139);
 
-	for (const char* fields :
-		 {R"({"dn":"5xyz"})", R"({"dn":"8junk"})", R"({"dn":"0abc"})", R"({"dn":"0 "})"}) {
+	for (const char* fields : {R"({"dn":"5xyz"})", R"({"dn":"8junk"})", R"({"dn":"5 "})",
+							   R"({"dn":"5e"})", R"({"dn":"0abc"})", R"({"dn":"0 "})"}) {
 		EXPECT_TRUE(
 			parse_fire_weather(esri_feature(fields), 1, FireWeatherLayer::Outlook).features.empty())
 			<< fields;
@@ -224,8 +224,9 @@ std::string categorical_with_times(std::string_view stamp) {
 
 TEST(Parser, ImpossibleSpcTimestampsStayAsSent) {
 	// Twelve digits that name no real UTC minute are not a YYYYMMDDHHMM time.
-	for (const char* stamp : {"202613400000", "202602300000", "202613010000", "202302291200",
-							  "202601152400", "202601151260", "202600011200", "202601001200"}) {
+	for (const char* stamp :
+		 {"202613400000", "202602300000", "202613010000", "202302291200", "202601152400",
+		  "202601151260", "202600011200", "202601001200", "000001011200"}) {
 		const CategoricalOutlookPayload payload =
 			parse_categorical(categorical_with_times(stamp), 1);
 		ASSERT_EQ(payload.features.size(), 1u) << stamp;
