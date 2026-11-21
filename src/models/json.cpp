@@ -1,7 +1,9 @@
 #include "models/json.hpp"
 
 #include <algorithm>
+#include <chrono>
 #include <cmath>
+#include <cstddef>
 #include <format>
 #include <glaze/util/fast_float.hpp>
 #include <limits>
@@ -125,10 +127,14 @@ double json_number_or_numeric_string(const Json& obj, const char* key) {
 		return v->get<double>();
 	}
 	if (v->is_string()) {
-		// Matches a C-locale std::stod for every value SPC publishes. No field
-		// means "nan" or "inf", so those read as 0 too.
-		const ParsedNumber parsed = parse_double(v->get<std::string>());
-		return parsed.ok && std::isfinite(parsed.value) ? parsed.value : 0.0;
+		// Every value SPC publishes is a whole number string. "5xyz" or "2.5in"
+		// is not 5 or 2.5, as fire weather's no-risk check already agrees, and
+		// no field means "nan" or "inf"; all of those read as 0.
+		const std::string& text = v->get<std::string>();
+		const ParsedNumber parsed = parse_double(text);
+		return parsed.ok && parsed.consumed == text.size() && std::isfinite(parsed.value)
+				   ? parsed.value
+				   : 0.0;
 	}
 	return 0.0;
 }
@@ -153,6 +159,20 @@ std::string spc_ts_to_iso8601(std::string_view spc_ts) {
 		if (c < '0' || c > '9') {
 			return std::string{spc_ts};
 		}
+	}
+	// Twelve digits are not yet a time: month 13 or February 30 stays as is.
+	const auto digits = [spc_ts](std::size_t at, std::size_t count) {
+		unsigned value = 0;
+		for (std::size_t i = at; i < at + count; ++i) {
+			value = value * 10 + static_cast<unsigned>(spc_ts[i] - '0');
+		}
+		return value;
+	};
+	const std::chrono::year_month_day date{std::chrono::year{static_cast<int>(digits(0, 4))},
+										   std::chrono::month{digits(4, 2)},
+										   std::chrono::day{digits(6, 2)}};
+	if (!date.ok() || digits(8, 2) > 23 || digits(10, 2) > 59) {
+		return std::string{spc_ts};
 	}
 	return std::format("{}-{}-{}T{}:{}:00Z", spc_ts.substr(0, 4), spc_ts.substr(4, 2),
 					   spc_ts.substr(6, 2), spc_ts.substr(8, 2), spc_ts.substr(10, 2));

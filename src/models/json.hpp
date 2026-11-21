@@ -1,9 +1,10 @@
 /// @file json.hpp
 /// @brief Private, null-safe helpers over Glaze's generic JSON tree.
 ///
-/// The spc-data helpers (`lookup` through `parse_rings`) keep that service's
-/// behavior exactly: key-case fallbacks, numeric strings, and outer rings only.
-/// Change them only together with spc-data.
+/// The spc-data helpers (`lookup` through `parse_rings`) feed the spc-data
+/// service, which links this library and stores its output. Their output for
+/// every value SPC publishes must not change: key-case fallbacks, numeric
+/// strings, and outer rings only. tests/golden/ guards it.
 
 #pragma once
 
@@ -43,14 +44,16 @@ struct ParsedNumber {
 ParsedNumber parse_double(std::string_view text);
 
 /// `obj[key]` as a number, accepting numeric strings such as "5" or "0.15".
-/// Missing, non-numeric, and non-finite values yield 0.
+/// Missing and non-finite values, and strings that are not wholly a number
+/// such as "5xyz", yield 0.
 double json_number_or_numeric_string(const Json& obj, const char* key);
 
 /// The LABEL/label/dn probability normalized to [0, 1]. Values above 1 are
 /// percentages and are divided by 100; out-of-range values yield 0.
 double normalized_probability(const Json& obj);
 
-/// "YYYYMMDDHHMM" to "YYYY-MM-DDTHH:MM:00Z"; any other input is returned as is.
+/// "YYYYMMDDHHMM" to "YYYY-MM-DDTHH:MM:00Z"; any other input, including twelve
+/// digits that name no real UTC time such as month 13, is returned as is.
 std::string spc_ts_to_iso8601(std::string_view spc_ts);
 
 /// `spc_ts_to_iso8601(json_string(j, key))`.
