@@ -6,6 +6,14 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A numeric string must be wholly a number: `"5xyz"`, `"2.5in"`, or `"123abc"` reads
+  as 0 instead of its leading digits, so a fire-weather `dn` of `"5xyz"` is no
+  longer an ELEV band (#46).
+- A twelve-digit SPC timestamp that names no real time, such as month 13 or
+  February 30, is returned as sent instead of as an invalid ISO 8601 string (#49).
+
 ## [0.4.8] - 2026-11-20
 
 ### Security

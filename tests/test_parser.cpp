@@ -11,6 +11,7 @@
 #include <cmath>
 #include <gtest/gtest.h>
 #include <string>
+#include <string_view>
 
 namespace {
 
@@ -166,6 +167,81 @@ TEST(Parser, NonFiniteNumericStringsReadAsZero) {
 	ASSERT_EQ(watches.watches.size(), 1u);
 	EXPECT_EQ(watches.watches[0].max_hail_size, 0.0);
 	EXPECT_EQ(watches.watches[0].max_wind_gust_knots, 0.0);
+}
+
+TEST(Parser, NumericStringsMustBeWholeNumbers) {
+	// "5xyz" is not 5: only a string that is entirely a number counts, as in
+	// the fire-weather no-risk check.
+	const StormReportPayload reports = parse_storm_reports(
+		R"({"features":[{"properties":{"magf":"75xyz"},"geometry":null},
+		{"properties":{"magf":"2.5in"},"geometry":null},
+		{"properties":{"magf":"1.75"},"geometry":null}]})");
+	ASSERT_EQ(reports.reports.size(), 3u);
+	EXPECT_EQ(reports.reports[0].magnitude, 0.0);
+	EXPECT_EQ(reports.reports[1].magnitude, 0.0);
+	EXPECT_EQ(reports.reports[2].magnitude, 1.75);
+
+	const WatchPayload watches = parse_watches(
+		R"({"features":[{"properties":{"number":"123abc"},"geometry":null},
+		{"properties":{"number":"139"},"geometry":null}]})");
+	ASSERT_EQ(watches.watches.size(), 2u);
+	EXPECT_EQ(watches.watches[0].number, 0);
+	EXPECT_EQ(watches.watches[1].number, 139);
+
+	for (const char* fields : {R"({"dn":"5xyz"})", R"({"dn":"8junk"})", R"({"dn":"5 "})",
+							   R"({"dn":"5e"})", R"({"dn":"0abc"})", R"({"dn":"0 "})"}) {
+		EXPECT_TRUE(
+			parse_fire_weather(esri_feature(fields), 1, FireWeatherLayer::Outlook).features.empty())
+			<< fields;
+	}
+	EXPECT_EQ(parse_fire_weather(esri_feature(R"({"dn":"5"})"), 1, FireWeatherLayer::Outlook)
+				  .features[0]
+				  .label,
+			  "ELEV");
+	EXPECT_EQ(parse_fire_weather(esri_feature(R"({"dn":"8"})"), 1, FireWeatherLayer::Outlook)
+				  .features[0]
+				  .label,
+			  "CRIT");
+
+	for (const char* fields : {R"({"label":"15xyz"})", R"({"label":"5%"})"}) {
+		EXPECT_TRUE(
+			parse_fire_weather(esri_feature(fields), 3, FireWeatherLayer::Outlook).features.empty())
+			<< fields;
+	}
+	const FireWeatherPayload day3 =
+		parse_fire_weather(esri_feature(R"({"label":"0.15"})"), 3, FireWeatherLayer::Outlook);
+	ASSERT_EQ(day3.features.size(), 1u);
+	EXPECT_DOUBLE_EQ(day3.features[0].probability, 0.15);
+}
+
+/// A day 1 SLGT feature whose ISSUE, VALID, and EXPIRE are `stamp`.
+std::string categorical_with_times(std::string_view stamp) {
+	const std::string quoted = "\"" + std::string{stamp} + "\"";
+	return R"({"features":[{"properties":{"LABEL":"SLGT","ISSUE":)" + quoted + R"(,"VALID":)" +
+		   quoted + R"(,"EXPIRE":)" + quoted +
+		   R"(},"geometry":{"type":"Polygon","coordinates":[[[-100,35],[-99,35],[-99,36],[-100,36],[-100,35]]]}}]})";
+}
+
+TEST(Parser, ImpossibleSpcTimestampsStayAsSent) {
+	// Twelve digits that name no real UTC minute are not a YYYYMMDDHHMM time.
+	for (const char* stamp :
+		 {"202613400000", "202602300000", "202613010000", "202302291200", "202601152400",
+		  "202601151260", "202600011200", "202601001200", "000001011200"}) {
+		const CategoricalOutlookPayload payload =
+			parse_categorical(categorical_with_times(stamp), 1);
+		ASSERT_EQ(payload.features.size(), 1u) << stamp;
+		EXPECT_EQ(payload.features[0].issued_at, stamp);
+		EXPECT_EQ(payload.features[0].valid_from, stamp);
+		EXPECT_EQ(payload.features[0].valid_until, stamp);
+	}
+	const CategoricalOutlookPayload leap =
+		parse_categorical(categorical_with_times("202402291200"), 1);
+	ASSERT_EQ(leap.features.size(), 1u);
+	EXPECT_EQ(leap.features[0].issued_at, "2024-02-29T12:00:00Z");
+	const CategoricalOutlookPayload late =
+		parse_categorical(categorical_with_times("202612312359"), 1);
+	ASSERT_EQ(late.features.size(), 1u);
+	EXPECT_EQ(late.features[0].valid_until, "2026-12-31T23:59:00Z");
 }
 
 TEST(Parser, ANullOrNonNumericLatestWkidFallsBackToWkid) {
