@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.9] - 2026-11-21
+
 ### Fixed
 
 - A numeric string must be wholly a number: `"5xyz"`, `"2.5in"`, or `"123abc"` reads
