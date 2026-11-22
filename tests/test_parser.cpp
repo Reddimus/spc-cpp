@@ -258,4 +258,157 @@ TEST(Parser, ANullOrNonNumericLatestWkidFallsBackToWkid) {
 	EXPECT_EQ(parse_conditional_intensity(body, 1, "tornado").features.size(), 1u);
 }
 
+std::string geojson_feature(std::string_view props, std::string_view geometry) {
+	return R"({"type":"FeatureCollection","features":[{"type":"Feature","properties":)" +
+		   std::string{props} + R"(,"geometry":)" + std::string{geometry} + "}]}";
+}
+
+constexpr std::string_view kValidGeoJsonPolygon =
+	R"({"type":"Polygon","coordinates":[[[-100,40],[-99,40],[-99,39],[-100,39],[-100,40]]]})";
+
+TEST(Parser, PresentZeroProbabilityDoesNotFallThroughToDn) {
+	for (const char* props : {R"({"LABEL":0,"dn":15})", R"({"LABEL":"0","dn":15})",
+							  R"({"label":0,"dn":30})", R"({"label":"0","dn":25})"}) {
+		const std::string body = geojson_feature(props, kValidGeoJsonPolygon);
+		EXPECT_TRUE(parse_day4_8(body, 4).features.empty()) << props;
+		EXPECT_TRUE(parse_probabilistic(body, 1, "tornado").features.empty()) << props;
+		EXPECT_TRUE(
+			parse_fire_weather(esri_feature(props), 3, FireWeatherLayer::Outlook).features.empty())
+			<< props;
+	}
+
+	// Absent, null, empty, or non-numeric LABEL still falls through to dn.
+	for (const char* props : {R"({"dn":15})", R"({"LABEL":null,"dn":15})",
+							  R"({"LABEL":"","dn":15})", R"({"LABEL":"75xyz","dn":15})"}) {
+		const Day48OutlookPayload day4 =
+			parse_day4_8(geojson_feature(props, kValidGeoJsonPolygon), 4);
+		ASSERT_EQ(day4.features.size(), 1u) << props;
+		EXPECT_DOUBLE_EQ(day4.features[0].probability, 0.15) << props;
+	}
+
+	// Nonzero LABEL wins over dn.
+	const Day48OutlookPayload nonzero =
+		parse_day4_8(geojson_feature(R"({"LABEL":5,"dn":30})", kValidGeoJsonPolygon), 4);
+	ASSERT_EQ(nonzero.features.size(), 1u);
+	EXPECT_DOUBLE_EQ(nonzero.features[0].probability, 0.05);
+}
+
+TEST(Parser, DegenerateGeoJsonRingsAreDropped) {
+	for (const char* geometry : {
+			 R"({"type":"Polygon","coordinates":[[]]})",
+			 R"({"type":"MultiPolygon","coordinates":[[[]]]})",
+			 R"({"type":"Polygon","coordinates":[42]})",
+			 R"({"type":"MultiPolygon","coordinates":[[42]]})",
+			 R"({"type":"Polygon","coordinates":[["x"]]})",
+			 R"({"type":"Polygon","coordinates":[[["x","y"],["a","b"]]]})",
+			 R"({"type":"Polygon","coordinates":[[[-98,34]]]})",
+			 R"({"type":"Polygon","coordinates":[[[-98,34],[-94,34]]]})",
+			 R"({"type":"Polygon","coordinates":[[[-98,34],[-98,34],[-98,34],[-98,34],[-98,34]]]})",
+			 R"({"type":"Polygon","coordinates":[[[-98,34],[-96,34],[-94,34],[-98,34]]]})",
+		 }) {
+		EXPECT_TRUE(
+			parse_categorical(geojson_feature(R"({"LABEL":"MRGL"})", geometry), 1).features.empty())
+			<< geometry;
+		EXPECT_TRUE(parse_probabilistic(geojson_feature(R"({"LABEL":15})", geometry), 1, "tornado")
+						.features.empty())
+			<< geometry;
+		EXPECT_TRUE(parse_conditional_intensity(geojson_feature(R"({"LABEL":"CIG1"})", geometry), 1,
+												"tornado")
+						.features.empty())
+			<< geometry;
+	}
+
+	// A MultiPolygon with one degenerate and one valid polygon keeps only the valid ring.
+	const CategoricalOutlookPayload mixed = parse_categorical(
+		geojson_feature(
+			R"({"LABEL":"SLGT"})",
+			R"({"type":"MultiPolygon","coordinates":[[[]],[[[-100,35],[-99,35],[-99,36],[-100,36],[-100,35]]]]})"),
+		1);
+	ASSERT_EQ(mixed.features.size(), 1u);
+	EXPECT_EQ(mixed.features[0].rings.size(), 1u);
+}
+
+TEST(Parser, DegenerateEsriRingsAreDropped) {
+	for (const char* rings : {
+			 R"([[]])",
+			 R"([[[-98,34]]])",
+			 R"([[[-98,34],[-94,34]]])",
+			 R"([[[-98,34],[-98,34],[-98,34],[-98,34],[-98,34]]])",
+			 R"([[[-98,34],[-96,34],[-94,34],[-98,34]]])",
+		 }) {
+		const std::string body =
+			R"({"spatialReference":{"wkid":4326},"features":[{"attributes":{"label":"CIG1","dn":15},"geometry":{"rings":)" +
+			std::string{rings} + "}}]}";
+		EXPECT_TRUE(parse_conditional_intensity(body, 1, "tornado").features.empty()) << rings;
+		EXPECT_TRUE(parse_day4_8(body, 4).features.empty()) << rings;
+		EXPECT_TRUE(parse_fire_weather(body, 3, FireWeatherLayer::Outlook).features.empty())
+			<< rings;
+	}
+
+	// Valid clockwise outer ring is kept; counter-clockwise hole is dropped.
+	const std::string valid_and_hole =
+		R"({"spatialReference":{"wkid":4326},"features":[{"attributes":{"label":"CIG1"},"geometry":{"rings":[
+			[[-98,34],[-98,38],[-94,38],[-94,34],[-98,34]],
+			[[-97,35],[-95,35],[-95,37],[-97,37],[-97,35]]
+		]}}]})";
+	const ConditionalIntensityPayload parsed =
+		parse_conditional_intensity(valid_and_hole, 1, "tornado");
+	ASSERT_EQ(parsed.features.size(), 1u);
+	EXPECT_EQ(parsed.features[0].rings.size(), 1u);
+}
+
+TEST(Parser, CategoricalDnFallbackMapsSpcCodes) {
+	struct Case {
+		const char* props;
+		const char* label;
+		std::uint8_t severity;
+	};
+	for (const Case& c : {
+			 Case{R"({"dn":2})", "TSTM", 1},
+			 Case{R"({"dn":3})", "MRGL", 1},
+			 Case{R"({"dn":4})", "SLGT", 2},
+			 Case{R"({"dn":5})", "ENH", 3},
+			 Case{R"({"dn":6})", "MDT", 4},
+			 Case{R"({"dn":8})", "HIGH", 5},
+			 Case{R"({"dn":"5"})", "ENH", 3},
+			 Case{R"({"dn":"8"})", "HIGH", 5},
+			 Case{R"({"dn":5,"label":"SLGT"})", "SLGT", 2},
+		 }) {
+		const CategoricalOutlookPayload p =
+			parse_categorical(geojson_feature(c.props, kValidGeoJsonPolygon), 1);
+		ASSERT_EQ(p.features.size(), 1u) << c.props;
+		EXPECT_EQ(p.features[0].label, c.label) << c.props;
+		EXPECT_EQ(p.features[0].severity, c.severity) << c.props;
+	}
+
+	// Unused dn codes (including 7) and malformed strings are dropped.
+	for (const char* props : {R"({"dn":0})", R"({"dn":7})", R"({"dn":"7"})", R"({"dn":"5xyz"})"}) {
+		EXPECT_TRUE(
+			parse_categorical(geojson_feature(props, kValidGeoJsonPolygon), 1).features.empty())
+			<< props;
+	}
+}
+
+TEST(Parser, StormReportPresentZeroMagfDoesNotFallThrough) {
+	const StormReportPayload reports = parse_storm_reports(R"({"features":[
+		{"properties":{"magf":0,"magnitude":"2.5","type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magf":"0","magnitude":"2.5","type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magf":0.0,"magnitude":2.5,"type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magf":1.75,"magnitude":"2.5","type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magnitude":"2.5","type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magf":null,"magnitude":"1.75","type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magf":"75xyz","magnitude":"2.5","type":"H"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}},
+		{"properties":{"magf":0,"magnitude":"EF0","type":"T"},"geometry":{"type":"Point","coordinates":[-97.5,35.5]}}
+	]})");
+	ASSERT_EQ(reports.reports.size(), 8u);
+	EXPECT_DOUBLE_EQ(reports.reports[0].magnitude, 0.0);
+	EXPECT_DOUBLE_EQ(reports.reports[1].magnitude, 0.0);
+	EXPECT_DOUBLE_EQ(reports.reports[2].magnitude, 0.0);
+	EXPECT_DOUBLE_EQ(reports.reports[3].magnitude, 1.75);
+	EXPECT_DOUBLE_EQ(reports.reports[4].magnitude, 2.5);
+	EXPECT_DOUBLE_EQ(reports.reports[5].magnitude, 1.75);
+	EXPECT_DOUBLE_EQ(reports.reports[6].magnitude, 2.5);
+	EXPECT_DOUBLE_EQ(reports.reports[7].magnitude, 0.0);
+}
+
 } // namespace

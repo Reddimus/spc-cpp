@@ -6,6 +6,18 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat a present numeric `0` in `LABEL`/`label` (`normalized_probability`) and
+  `magf` (`parse_storm_reports`) as zero instead of falling through to `dn` or
+  `magnitude` (#52, #56).
+- Drop empty and zero-area rings (fewer than 3 points, identical points, or
+  collinear vertices) in both GeoJSON `parse_rings` and Esri `parse_esri_rings`
+  so degenerate geometry does not bypass `!rings.empty()` (#53, #54).
+- Map numeric and numeric-string `dn` codes (`2`=`TSTM`, `3`=`MRGL`, `4`=`SLGT`,
+  `5`=`ENH`, `6`=`MDT`, `8`=`HIGH`) when `parse_categorical` falls back to `dn`
+  (#55).
+
 ## [0.4.9] - 2026-11-21
 
 ### Fixed

@@ -43,6 +43,11 @@ struct ParsedNumber {
 /// as with std::from_chars.
 ParsedNumber parse_double(std::string_view text);
 
+/// `obj[key]` as a finite number, accepting numeric strings such as "5" or
+/// "0.15". Returns nullopt when the key is absent, null, non-numeric,
+/// non-finite, or a string that is not wholly a number such as "5xyz".
+std::optional<double> try_json_number_or_numeric_string(const Json& obj, const char* key);
+
 /// `obj[key]` as a number, accepting numeric strings such as "5" or "0.15".
 /// Missing and non-finite values, and strings that are not wholly a number
 /// such as "5xyz", yield 0.
