@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <optional>
 #include <utility>
 
 namespace spc {
@@ -51,8 +52,10 @@ StormReportPayload detail::storm_reports_from_tree(const Json& root) {
 		sr.type = detail::json_string(*props, "type");
 		sr.type_text = detail::json_string(*props, "typetext");
 		// `magf` is numeric; `magnitude` is the same value as a string.
-		sr.magnitude = detail::json_number_or_numeric_string(*props, "magf");
-		if (sr.magnitude == 0.0) {
+		if (const std::optional<double> magf =
+				detail::try_json_number_or_numeric_string(*props, "magf")) {
+			sr.magnitude = *magf;
+		} else {
 			sr.magnitude = detail::json_number_or_numeric_string(*props, "magnitude");
 		}
 		sr.unit = detail::json_string(*props, "unit");

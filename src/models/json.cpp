@@ -118,36 +118,44 @@ ParsedNumber parse_double(std::string_view text) {
 	return parsed;
 }
 
-double json_number_or_numeric_string(const Json& obj, const char* key) {
+std::optional<double> try_json_number_or_numeric_string(const Json& obj, const char* key) {
 	const Json* v = lookup(obj, key);
 	if (v == nullptr || v->is_null()) {
-		return 0.0;
+		return std::nullopt;
 	}
 	if (v->is_number()) {
-		return v->get<double>();
+		const double number = v->get<double>();
+		return std::isfinite(number) ? std::optional<double>{number} : std::nullopt;
 	}
 	if (v->is_string()) {
 		// Every value SPC publishes is a whole number string. "5xyz" or "2.5in"
 		// is not 5 or 2.5, as fire weather's no-risk check already agrees, and
-		// no field means "nan" or "inf"; all of those read as 0.
+		// no field means "nan" or "inf"; all of those are unreadable.
 		const std::string& text = v->get<std::string>();
 		const ParsedNumber parsed = parse_double(text);
 		return parsed.ok && parsed.consumed == text.size() && std::isfinite(parsed.value)
-				   ? parsed.value
-				   : 0.0;
+				   ? std::optional<double>{parsed.value}
+				   : std::nullopt;
 	}
-	return 0.0;
+	return std::nullopt;
+}
+
+double json_number_or_numeric_string(const Json& obj, const char* key) {
+	return try_json_number_or_numeric_string(obj, key).value_or(0.0);
 }
 
 double normalized_probability(const Json& obj) {
-	double value = json_number_or_numeric_string(obj, "LABEL");
-	if (value == 0.0) {
-		value = json_number_or_numeric_string(obj, "label");
+	std::optional<double> value = try_json_number_or_numeric_string(obj, "LABEL");
+	if (!value) {
+		value = try_json_number_or_numeric_string(obj, "label");
 	}
-	if (value == 0.0) {
-		value = json_number_or_numeric_string(obj, "dn");
+	if (!value) {
+		value = try_json_number_or_numeric_string(obj, "dn");
 	}
-	const double normalized = value > 1.0 ? value / 100.0 : value;
+	if (!value) {
+		return 0.0;
+	}
+	const double normalized = *value > 1.0 ? *value / 100.0 : *value;
 	return normalized >= 0.0 && normalized <= 1.0 ? normalized : 0.0;
 }
 
@@ -214,16 +222,22 @@ std::vector<Polygon> parse_rings(const Json& geom) {
 		return r;
 	};
 
+	auto push_if_valid = [&out](Polygon ring) {
+		if (ring.size() >= 3 && ring_signed_area(ring) != 0.0) {
+			out.push_back(std::move(ring));
+		}
+	};
+
 	if (type == "Polygon") {
 		if (!coords.empty()) {
-			out.push_back(parse_ring(coords[0])); // outer ring
+			push_if_valid(parse_ring(coords[0])); // outer ring
 		}
 	} else if (type == "MultiPolygon") {
 		for (const glz::generic& poly : coords) {
 			if (poly.is_array()) {
 				const glz::generic::array_t& poly_arr = poly.get_array();
 				if (!poly_arr.empty()) {
-					out.push_back(parse_ring(poly_arr[0])); // outer ring of each
+					push_if_valid(parse_ring(poly_arr[0])); // outer ring of each
 				}
 			}
 		}
@@ -293,8 +307,10 @@ std::vector<Polygon> parse_esri_rings_with_budget(const Json& geom, const Json* 
 		if (mercator) {
 			validate_mercator(r); // Validate holes too, before the winding filter.
 		}
-		// Counter-clockwise (positive area in source coordinates) is an Esri hole.
-		if (r.empty() || ring_signed_area(r) > 0.0) {
+		// Counter-clockwise (positive area in source coordinates) is an Esri hole;
+		// zero area (fewer than 3 points, identical points, or collinear vertices)
+		// is not a polygon.
+		if (r.size() < 3 || !(ring_signed_area(r) < 0.0)) {
 			continue;
 		}
 		out.push_back(std::move(r));

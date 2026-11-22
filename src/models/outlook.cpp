@@ -16,6 +16,35 @@ namespace spc {
 
 using detail::Json;
 
+namespace {
+
+/// NOAA SPC categorical dn band codes (from SPC_wx_outlks MapServer renderer;
+/// 7 is unused).
+std::string label_from_dn(const Json& props) {
+	const double dn = detail::json_number_or_numeric_string(props, "dn");
+	if (dn == 2.0) {
+		return "TSTM";
+	}
+	if (dn == 3.0) {
+		return "MRGL";
+	}
+	if (dn == 4.0) {
+		return "SLGT";
+	}
+	if (dn == 5.0) {
+		return "ENH";
+	}
+	if (dn == 6.0) {
+		return "MDT";
+	}
+	if (dn == 8.0) {
+		return "HIGH";
+	}
+	return {};
+}
+
+} // namespace
+
 std::uint8_t severity_from_label(std::string_view label) noexcept {
 	if (label == "TSTM") {
 		return 1; // General thunderstorm (some feeds include this)
@@ -58,7 +87,10 @@ CategoricalOutlookPayload detail::categorical_from_tree(const Json& root, std::i
 			of.label = detail::json_string(*props, "label");
 		}
 		if (of.label.empty()) {
-			of.label = detail::json_string(*props, "dn");
+			of.label = label_from_dn(*props);
+			if (of.label.empty()) {
+				of.label = detail::json_string(*props, "dn");
+			}
 		}
 		of.severity = severity_from_label(of.label);
 		of.issued_at = detail::as_spc_ts(*props, "ISSUE");
