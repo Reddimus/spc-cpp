@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.10] - 2026-11-22
+
 ### Fixed
 
 - Treat a present numeric `0` in `LABEL`/`label` (`normalized_probability`) and
