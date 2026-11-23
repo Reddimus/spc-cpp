@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.11] - 2026-11-23
+
 ### Fixed
 
 - `parse_storm_reports` keeps a Point at exactly `(0, 0)` instead of replacing it
