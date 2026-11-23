@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `parse_storm_reports` keeps a Point at exactly `(0, 0)` instead of replacing it
+  with the `lon`/`lat` in the properties, which now stand in only when the Point
+  is missing (#59).
+
 ## [0.4.10] - 2026-11-22
 
 ### Fixed

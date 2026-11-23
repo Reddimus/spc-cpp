@@ -9,9 +9,11 @@
 #include "spc/models/watch.hpp"
 
 #include <cmath>
+#include <cstddef>
 #include <gtest/gtest.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace {
 
@@ -409,6 +411,26 @@ TEST(Parser, StormReportPresentZeroMagfDoesNotFallThrough) {
 	EXPECT_DOUBLE_EQ(reports.reports[5].magnitude, 1.75);
 	EXPECT_DOUBLE_EQ(reports.reports[6].magnitude, 2.5);
 	EXPECT_DOUBLE_EQ(reports.reports[7].magnitude, 0.0);
+}
+
+TEST(Parser, StormReportPointAtOriginIsKept) {
+	// The property lon/lat stand in only for a missing Point, not for one at (0, 0).
+	const StormReportPayload reports = parse_storm_reports(R"({"features":[
+		{"properties":{"lon":-97.5,"lat":37.7},"geometry":{"type":"Point","coordinates":[0,0]}},
+		{"properties":{"lon":-97.5,"lat":37.7},"geometry":{"type":"Point","coordinates":[0,37.6]}},
+		{"properties":{"lon":-97.5,"lat":37.7},"geometry":{"type":"Point","coordinates":[-97.4,0]}},
+		{"properties":{"lon":-97.5,"lat":37.7},"geometry":null},
+		{"properties":{"lon":-97.5,"lat":37.7},"geometry":{"type":"Point"}},
+		{"properties":{"lon":-97.5,"lat":37.7},"geometry":{"type":"Point","coordinates":["0","0"]}},
+		{"properties":{},"geometry":{"type":"Point","coordinates":[0,0]}}
+	]})");
+	ASSERT_EQ(reports.reports.size(), 7u);
+	const std::vector<LonLat> expected = {{0.0, 0.0},	 {0.0, 37.6},	{-97.4, 0.0}, {-97.5, 37.7},
+										  {-97.5, 37.7}, {-97.5, 37.7}, {0.0, 0.0}};
+	for (std::size_t i = 0; i < expected.size(); ++i) {
+		EXPECT_DOUBLE_EQ(reports.reports[i].location.lon, expected[i].lon) << "feature " << i;
+		EXPECT_DOUBLE_EQ(reports.reports[i].location.lat, expected[i].lat) << "feature " << i;
+	}
 }
 
 } // namespace

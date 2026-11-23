@@ -38,14 +38,17 @@ StormReportPayload detail::storm_reports_from_tree(const Json& root) {
 		const Json* geometry = detail::lookup(feat, "geometry");
 		const Json* coords =
 			geometry != nullptr ? detail::lookup(*geometry, "coordinates") : nullptr;
+		// A flag, not a (0, 0) check: a Point can sit at (0, 0).
+		bool has_point = false;
 		if (coords != nullptr && coords->is_array()) {
 			const Json::array_t& c = coords->get_array();
 			if (c.size() >= 2 && c[0].is_number() && c[1].is_number()) {
 				sr.location = {c[0].get<double>(), c[1].get<double>()};
+				has_point = true;
 			}
 		}
 		// IEM repeats lon/lat in the properties; use them when the Point is missing.
-		if (sr.location.lon == 0.0 && sr.location.lat == 0.0) {
+		if (!has_point) {
 			sr.location = {detail::json_number_or_numeric_string(*props, "lon"),
 						   detail::json_number_or_numeric_string(*props, "lat")};
 		}
