@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.12] - 2026-11-26
+
 ### Fixed
 
 - `parse_watches` reads Esri `attributes` like GeoJSON `properties`, as the other
