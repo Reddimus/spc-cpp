@@ -34,8 +34,8 @@ WatchPayload detail::watches_from_tree(const Json& root) {
 	}
 	detail::PayloadGeometryParser geometry_parser(root);
 	for (const Json& feat : features_node->get_array()) {
-		const Json* props = detail::lookup(feat, "properties");
-		if (props == nullptr || !props->is_object()) {
+		const Json* props = detail::feature_fields(feat);
+		if (props == nullptr) {
 			continue;
 		}
 		Watch w;

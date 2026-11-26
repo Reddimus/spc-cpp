@@ -458,6 +458,27 @@ TEST(Models, WatchParsesIemGeoJson) {
 	EXPECT_FALSE(p.watches[0].rings.empty());
 }
 
+TEST(Models, WatchReadsEsriAttributesLikeGeoJsonProperties) {
+	// Every other feature parser accepts Esri `attributes` as well as GeoJSON
+	// `properties`; watches must too, with either geometry shape.
+	const char* const rings =
+		R"("geometry":{"rings":[[[-98.27,32.02],[-94.29,34.12],[-94.29,32.38],[-98.27,30.28],[-98.27,32.02]]],"spatialReference":{"wkid":4326}})";
+	const char* const multipolygon =
+		R"("geometry":{"type":"MultiPolygon","coordinates":[[[[-98.27,32.02],[-94.29,34.12],[-94.29,32.38],[-98.27,30.28],[-98.27,32.02]]]]})";
+	for (const char* key : {"properties", "attributes"}) {
+		for (const char* geometry : {rings, multipolygon}) {
+			const std::string body = std::string{R"({"features":[{")"} + key +
+									 R"(":{"type":"TOR","number":139,"year":2024,"sel":"SEL9"},)" +
+									 geometry + "}]}";
+			const WatchPayload p = parse_watches(body);
+			ASSERT_EQ(p.watches.size(), 1u) << key << " " << geometry;
+			EXPECT_EQ(p.watches[0].number, 139) << key;
+			EXPECT_EQ(p.watches[0].sel, "SEL9") << key;
+			EXPECT_EQ(p.watches[0].rings.size(), 1u) << key << " " << geometry;
+		}
+	}
+}
+
 TEST(Models, WatchNumbersThatAreNotFiniteIntegersBecomeZero) {
 	// A plain cast of inf or 1e300 to int32 is undefined behavior.
 	const WatchPayload p = parse_watches(R"({"features":[
