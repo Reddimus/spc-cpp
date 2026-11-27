@@ -6,7 +6,7 @@ NPROC := $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 SOURCES = find src include tests examples benchmarks \( -name '*.cpp' -o -name '*.hpp' \) -print0
 # The version bundled by the markdownlint-cli2-action pin in ci.yml, so local
 # and CI lint agree. Change both together.
-MARKDOWNLINT := npx --yes markdownlint-cli2@0.24.0
+MARKDOWNLINT := npx --yes markdownlint-cli2@0.24.2
 
 .PHONY: all build debug configure configure-debug test test-consumers fixtures-check lint \
 	lint-md format format-md tidy bench coverage pre-commit install-hooks clean help
