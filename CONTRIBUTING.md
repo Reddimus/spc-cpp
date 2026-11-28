@@ -39,7 +39,7 @@ Glaze is strictly internal (`src/` only) and never exposed in public `include/` 
 
 ## Checks to run before pushing
 
-CI checks every target below on Linux, macOS, and Windows:
+CI runs unit tests on Linux, macOS, and Windows. Lint and fixture checks run on Linux, and installed/FetchContent consumer checks run on Linux and macOS:
 
 ```bash
 make test             # Release build + unit, parity, and golden tests

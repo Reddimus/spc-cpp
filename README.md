@@ -149,7 +149,7 @@ ArcGIS errors returned inside HTTP 200 JSON bodies are handled automatically (42
 You can also parse payloads directly offline via `spc::parse_categorical`, `spc::parse_probabilistic`, `spc::parse_conditional_intensity`, `spc::parse_day4_8`, `spc::parse_fire_weather`, `spc::parse_mesoscale_discussions`, `spc::parse_watches`, and `spc::parse_storm_reports`. They throw `std::runtime_error` on malformed JSON or invalid Esri geometry.
 
 - **Coordinates:** Returned as `(lon, lat)` degrees. Esri Web Mercator (`3857`, `102100`, `102113`) is converted to degrees within 1 m accuracy; `4326`, `4269`, and unreferenced data are kept as degrees. Other spatial references fail (pass `outSR=4326` for custom `query_layer` calls).
-- **Resource bounds:** Each call caps total decoded bytes at `ClientConfig::max_response_bytes` (64 MiB default) and projected edge expansion at 1,000,000 points across all pages.
+- **Resource bounds:** With `HttpClient`, decoded responses are capped at `ClientConfig::max_response_bytes` (64 MiB default; `0` disables the cap), shared across all pages and layers of an `ArcGISClient` call. Custom transports must bound individual responses themselves (`ArcGISClient` applies a 64 MiB paging budget across pages without refusing the first response), and offline `parse_*` functions have no byte cap. Projected edge expansion is capped at 1,000,000 added points per payload (shared across all pages and layers of an `ArcGISClient` call).
 
 ## Configuration and threads
 
@@ -161,7 +161,7 @@ const spc::ArcGISClient client{
 };
 ```
 
-Default clients are thread-safe and share a pooled libcurl transport. To plug in your own HTTP client or mock responses in tests, implement `spc::HttpTransport` (concurrent `get` calls must be thread-safe):
+Default clients are thread-safe, and each instance owns its own pooled libcurl transport; pass a shared `std::shared_ptr<spc::HttpClient>` to reuse one pool across multiple clients. To plug in your own HTTP client or mock responses in tests, implement `spc::HttpTransport` (concurrent `get` calls must be thread-safe):
 
 ```cpp
 struct MyTransport final : spc::HttpTransport {
