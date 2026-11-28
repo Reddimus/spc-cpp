@@ -18,7 +18,6 @@ knowledge_base:
   code_guidelines:
     enabled: true
     filePatterns:
-      - CLAUDE.md
       - CONTRIBUTING.md
 chat:
   auto_reply: false

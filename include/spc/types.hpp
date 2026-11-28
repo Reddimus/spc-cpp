@@ -1,6 +1,5 @@
 /// @file types.hpp
-/// @brief Day 1-3 convective outlook types. Their shape matches the internal
-/// spc-data service.
+/// @brief Day 1-3 convective outlook types.
 
 #pragma once
 

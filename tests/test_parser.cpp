@@ -1,6 +1,6 @@
 /// @file test_parser.cpp
-/// @brief Day 1-3 parser behavior shared with spc-data. The assertions match
-/// spc-data's own parser tests.
+/// @brief Unit tests for outlook, probability, timestamp, ring, watch, and
+/// storm-report parsers.
 
 #include "spc/models/convective.hpp"
 #include "spc/models/fire_weather.hpp"

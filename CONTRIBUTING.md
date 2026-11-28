@@ -1,46 +1,55 @@
 # Contributing
 
-Thanks for helping. Report security problems through GitHub's private
-vulnerability reporting, as [SECURITY.md](SECURITY.md) describes, not in a
-public issue.
+Thanks for helping improve `spc-cpp`! Please report security vulnerabilities privately as described in [SECURITY.md](SECURITY.md) rather than opening a public issue.
 
-## Set up
+## Quick setup
 
 ```bash
 git clone https://github.com/Reddimus/spc-cpp.git
 cd spc-cpp
 
-# Ubuntu 24.04 (its packaged CMake is too old)
-sudo apt install build-essential clang-format libcurl4-openssl-dev
+# Ubuntu 24.04 (CMake 3.31+ is required)
+sudo apt install build-essential clang-format libcurl4-openssl-dev libssl-dev
 sudo snap install cmake --classic
-# macOS (Xcode or its command-line tools provide Apple Clang and libcurl).
+
+# macOS (Xcode command-line tools provide Apple Clang and libcurl)
 # CI formats with clang-format 18; open a new shell after ensurepath.
 brew install cmake pipx
 pipx ensurepath
 pipx install clang-format==18.1.8
 
 make test
-make install-hooks   # optional: check formatting and lint before each commit
+make install-hooks   # optional: runs make lint before each commit
 ```
 
-`make help` lists every target.
+Run `make help` to see all available build, test, lint, and benchmark targets.
 
-## Before you push
+## Project layout
 
-CI runs all of these, so running them first saves a round trip:
+```mermaid
+flowchart LR
+    Core["spc_core: Error, RateLimiter, Retry, Geometry"] --> Http["spc_http: HttpClient + libcurl"]
+    Core --> Models["spc_models: JSON + Product Parsers + Private Glaze"]
+    Http --> Api["spc_api: ArcGISClient, StaticFeedClient, ArchiveClient"]
+    Models --> Api
+    Api --> Umbrella["spc::spc"]
+```
+
+Glaze is strictly internal (`src/` only) and never exposed in public `include/` headers, verified automatically by `make test-consumers`.
+
+## Checks to run before pushing
+
+CI runs unit tests on Linux, macOS, and Windows. Lint and fixture checks run on Linux, and installed/FetchContent consumer checks run on Linux and macOS:
 
 ```bash
-make test             # build and unit tests
-make lint             # clang-format and the auto audit
-make lint-md          # Markdown lint (needs Node)
-make fixtures-check   # fixture checksums
-make test-consumers   # installed and FetchContent consumers
+make test             # Release build + unit, parity, and golden tests
+make lint             # clang-format 18 check + explicit-type audit
+make lint-md          # Markdown lint (requires Node.js)
+make fixtures-check   # Verify tests/fixtures/SHA256SUMS
+make test-consumers   # Verify install, find_package, FetchContent, and Quick Start
 ```
 
-CI also runs the tests with ASan and UBSan, with TSan, and on the oldest
-compilers the README lists: Clang 18 with libc++, Clang 19 with libstdc++,
-and Apple Clang 17. It compiles the libraries with clang-tidy too. To run the
-sanitizers and clang-tidy locally:
+You can also run sanitizers and `clang-tidy` locally:
 
 ```bash
 make test BUILD_DIR=build-asan CMAKE_ARGS=-DSPC_ENABLE_SANITIZERS=ON
@@ -48,8 +57,7 @@ make test BUILD_DIR=build-tsan CMAKE_ARGS=-DSPC_ENABLE_THREAD_SANITIZER=ON
 make tidy
 ```
 
-On macOS, `make tidy` needs Homebrew's LLVM and curl. Apple's SDK copy of
-curl adds an include path that breaks non-Apple Clang:
+On macOS, `make tidy` needs Homebrew LLVM 18 and Homebrew curl so non-Apple Clang avoids Apple's SDK curl include conflicts:
 
 ```bash
 brew install llvm@18 curl
@@ -58,169 +66,57 @@ make tidy CMAKE_ARGS="-DCMAKE_CXX_COMPILER=$llvm/bin/clang++ \
   -DSPC_CLANG_TIDY_EXECUTABLE=$llvm/bin/clang-tidy -DCMAKE_PREFIX_PATH=$(brew --prefix curl)"
 ```
 
-## Code style
+## Coding conventions
 
-- `.clang-format` decides layout: tabs, 100 columns. `make format` applies it.
-  Use clang-format 18, as CI does; newer versions format a few constructs
-  differently.
-- Spell out types. `auto` is allowed only for iterators, structured
-  bindings, and lambdas, and `tools/cpp_auto_audit.py` enforces that.
-  Mark a genuine exception with `// auto-ok`.
-- Public failures return `spc::Result<T>`. Client methods never throw for
-  network or data problems.
-- Keep comments short and about why. History belongs in commit messages and
-  the changelog.
+- **Formatting:** Tabs, 100 columns, enforced by `.clang-format` (`make format` applies it using `clang-format` 18).
+- **Explicit types:** `tools/cpp_auto_audit.py` permits `auto` only for iterators, structured bindings, and lambdas (mark rare exceptions with `// auto-ok`).
+- **No exceptions across client boundaries:** Public client methods return `spc::Result<T>` and never throw on network or parse errors.
+- **Stable parser behavior:** Keep key-case fallbacks (`LABEL`/`label`/`dn`), numeric-string parsing, outer-ring-only geometry, and product-specific label mappers (each product uses its own mapper rather than sharing `severity_from_label`). `tests/golden/` guards output against unintended regressions.
+- **Offline unit tests:** Test clients through `HttpTransport` or the loopback servers in [`tests/support/`](tests/support/); unit tests never hit the network.
+- **ArcGIS layer contract:** If NOAA renumbers layers, update `kLayers` in [`src/api/client.cpp`](src/api/client.cpp) and [`tests/fixtures/arcgis_layers_2026-09-03.json`](tests/fixtures/arcgis_layers_2026-09-03.json) together, then run `python3 tools/verify_arcgis_metadata.py` against the live services.
+- **Short comments:** Comment *why*, not *what*; keep history in commit messages and [`CHANGELOG.md`](CHANGELOG.md).
 
-## Rules that are easy to break
+## Fixtures and golden tests
 
-- **The Day 1-3 parser matches spc-data.** `parse_categorical`,
-  `parse_probabilistic`, `severity_from_label`, `point_in_polygon`, and the
-  helpers they call in `src/models/json.hpp` must give the same output as
-  the internal spc-data service. Key-case fallbacks, numeric strings, and
-  outer-rings-only geometry are part of that.
-- **Each product has its own label mapping.** Fire weather, conditional
-  intensity, and watches must not reuse `severity_from_label`.
-- **Tests never use the network.** Test clients through `HttpTransport`, as
-  `tests/test_client.cpp` does, or against the loopback server in
-  `tests/support/`.
-- **The ArcGIS layer table has a contract.** When NOAA renumbers layers,
-  update `kLayers` in `src/api/client.cpp` and
-  `tests/fixtures/arcgis_layers_2026-09-03.json` together, then run
-  `python3 tools/verify_arcgis_metadata.py`, which checks the live services.
-
-## Fixtures
-
-`tests/fixtures/` holds captured NOAA and IEM responses. After adding or
-changing one, update the checksums. Files in subdirectories are fixtures too;
-dotfiles are not:
+When adding or editing captured payloads in [`tests/fixtures/`](tests/fixtures/), document the source in [`tests/fixtures/README.md`](tests/fixtures/README.md), update checksums, and add or update the matching golden snapshot:
 
 ```bash
+# Update fixture checksums
 find tests/fixtures -type f ! -path '*/.*' ! -path tests/fixtures/README.md \
   ! -path tests/fixtures/SHA256SUMS -exec shasum -a 256 {} + |
   LC_ALL=C sort -k 2 > tests/fixtures/SHA256SUMS
 make fixtures-check
-```
 
-Say where the file came from in `tests/fixtures/README.md`.
-
-`tests/golden/` holds each parser's output on the fixtures as text, and
-`tests/test_golden.cpp` fails when that output changes. A new fixture needs
-a case there, or a place in its list of fixtures no parser reads. When a
-change to parsed output is intended, rewrite the files and review the diff:
-
-```bash
+# Update golden snapshots when an output change is intentional, then inspect the diff
 cmake --build build
 SPC_UPDATE_GOLDEN=1 ./build/tests/spc_tests --gtest_filter='Parsers/Golden.*'
-git status --short tests/golden   # new cases are untracked files
 git diff tests/golden
 ```
 
 ## Benchmarks
 
-`make bench` builds the Google Benchmark suite in `build-bench`, a Release
-build, and runs it. `BENCH_ARGS` passes flags through, for example
-`make bench BENCH_ARGS=--benchmark_filter=BM_Parse`.
-
-Each benchmark also reports the heap use of one call: `allocs`,
-`alloc_bytes`, `peak_bytes`, and `retained_bytes`, the memory the result
-keeps. MSVC runtime DLL allocations are outside this counter.
-Compare heap counters with the same build and input. On macOS,
-`instructions` per iteration also helps compare CPU work. Timings vary: to compare two builds, run each with repetitions and
-random interleaving, then compare the results with Google Benchmark's
-`compare.py`, which needs numpy and scipy:
+`make bench` builds and runs Google Benchmark in `build-bench` (`BENCH_ARGS=--benchmark_filter=BM_Parse` filters cases). Each benchmark reports warm heap stats (`allocs`, `alloc_bytes`, `peak_bytes`, `retained_bytes`) and `instructions` on macOS. To compare two branches accurately, run interleaved repetitions and `compare.py` (requires `numpy` and `scipy`):
 
 ```bash
 args="--benchmark_repetitions=10 --benchmark_enable_random_interleaving=true"
-git switch main
-make bench BENCH_ARGS="$args --benchmark_out=build-bench/main.json"
-git switch my-branch
-make bench BENCH_ARGS="$args --benchmark_out=build-bench/branch.json"
+git switch main && make bench BENCH_ARGS="$args --benchmark_out=build-bench/main.json"
+git switch my-branch && make bench BENCH_ARGS="$args --benchmark_out=build-bench/branch.json"
 python3 build-bench/_deps/benchmark-src/tools/compare.py benchmarks \
   build-bench/main.json build-bench/branch.json
 ```
 
-Under Valgrind, pass `--soname-synonyms=somalloc=nouserintercepts`, or
-Valgrind's own operator new replaces the counting one and the suite exits
-with an error.
+## Pull requests and releasing
 
-## Pull requests
-
-- Branch from `main` and open a pull request against it. Every CI job must
-  pass before merging.
-- Use a conventional-commit title, such as `fix(api): ...`.
-- Add user-visible changes to `CHANGELOG.md` under `[Unreleased]`.
-- Pull requests are squash-merged, so the title becomes the commit on `main`.
-
-## Releasing
-
-1. In a pull request, set the three numbers in `include/spc/version.hpp`
-   (CMake reads them from there), move `[Unreleased]` to
-   `[X.Y.Z] - YYYY-MM-DD` in `CHANGELOG.md`, and update the `GIT_TAG` and
-   `find_package` versions in `README.md`. `make test-consumers` fails if
-   either README version does not match.
-2. After it merges, tag `main` and push the tag:
-   `git tag vX.Y.Z && git push origin vX.Y.Z`.
-3. The release workflow checks that the tag matches `version.hpp`, runs
-   the tests and consumer checks, then publishes the release with the
-   changelog section as its notes.
-
-## Security reports
-
-SECURITY.md and the issue templates send reporters to GitHub's private
-vulnerability reporting. It is a repository setting, and with it off reporters
-have no private channel. Keep it on (Settings, Advanced Security) and check it
-after changing repository settings:
-
-```bash
-gh api repos/Reddimus/spc-cpp/private-vulnerability-reporting   # {"enabled":true}
+```mermaid
+flowchart LR
+    PR["Branch + PR (Conventional Title)"] --> CI["All CI Jobs Green"]
+    CI --> Merge["Squash-Merge to main"]
+    Merge --> Bump["Release PR: version.hpp, CHANGELOG, README"]
+    Bump --> Tag["Signed Tag vX.Y.Z -> GitHub Release"]
 ```
 
-## Repository tools
-
-`.mcp.json` (Claude) and `.codex/config.toml` (Codex) configure
-[StormScope](https://github.com/thornjad/stormscope), a community weather MCP,
-pinned to commit `ad398a6fb3699910d3b5fb891b0f1c96cdc5b040`. Install
-[uv](https://docs.astral.sh/uv/) and start a new trusted client session.
-It fetches public SPC/NWS data without an API key. Automatic location detection
-is disabled; pass coordinates explicitly. Codex exposes only outlooks, alerts,
-forecasts, and conditions. This tool is independent of the C++ library build.
-
-`.greptile/config.json` requests Apex reviews on ready PRs and new pushes, leaves the PR
-description unchanged, and disables automatic approval. Each Apex review costs 10 credits.
-
-## Review fallback
-
-Greptile reviews ready PRs and new pushes first. Only its authenticated
-App's credit-refusal message on a default-branch PR enables CodeRabbit
-through the Review fallback workflow and `review:greptile-quota-fallback`
-label. CodeRabbit's open and push reviews are disabled; each backup request
-needs a Greptile credit refusal.
-
-A refusal reports exhausted organization credits, without a commit SHA. The
-workflow observes the current head; CodeRabbit may see a newer one. A
-completed Greptile review of the current head suppresses fallback and
-removes the opt-in label. Timeouts, generic failures, and an in-progress
-summary never enable it.
-
-The workflow records a reservation before adding the label to suppress
-duplicate automatic requests. Deduplication relies on GitHub comment-list
-visibility. If delivery fails or CodeRabbit is rate-limited, inspect the
-latest feedback, then retry Review fallback from Actions with the PR number.
-Historical retries stop after newer completed Greptile activity. Each event
-reconciles the full PR state, so a replaced queued event does not lose the
-credit refusal or recovery. The label
-means requested, not completed: verify the reviewed commit before merging.
-Skipped-review comments are disabled. Greptile footers stay visible so the
-workflow can recognize the reviewed commit.
-Maintainers can still request either reviewer manually. No paid review
-overages are enabled by this workflow.
-
-Test the helper with `node --test .github/scripts/review-fallback.test.cjs`.
-
-`statusCommentsEnabled` enables Greptile review summaries.
-Enable **Post Status Comments** in Greptile's dashboard for error notices.
-The fallback needs summary footers and authenticated credit refusals.
-
-If Greptile shows exhausted credits only in its dashboard, no GitHub event can
-start the fallback. After verifying that refusal, comment `@coderabbitai full review`
-on the PR. Do not request a backup for timeouts or other errors.
+- **Pull requests:** Branch from `main`, use a conventional-commit title (e.g., `fix(api): ...`), record user-visible changes under `[Unreleased]` in [`CHANGELOG.md`](CHANGELOG.md), and ensure CI passes before squash-merging.
+- **Releasing:**
+  1. Open a PR updating [`include/spc/version.hpp`](include/spc/version.hpp), dating a `[X.Y.Z] - YYYY-MM-DD` section in [`CHANGELOG.md`](CHANGELOG.md), and updating `GIT_TAG` (and `find_package` on minor bumps) in [`README.md`](README.md). Verify with `make test-consumers`.
+  2. After merging, tag `main` (`git tag -s vX.Y.Z -m "Release X.Y.Z" && git push origin vX.Y.Z`). The release workflow validates the tag against `version.hpp`, runs tests and consumer checks, and publishes the matching changelog notes.
+- **Private vulnerability reporting:** Keep GitHub private vulnerability reporting enabled under repository Security settings (`gh api repos/Reddimus/spc-cpp/private-vulnerability-reporting`).

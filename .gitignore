@@ -44,5 +44,3 @@ credentials*.json
 service-account*.json
 token.json
 secrets/
-**/.claude/settings.local.json
-.claude/worktrees/

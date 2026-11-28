@@ -111,7 +111,7 @@ include(FetchContent)
 FetchContent_Declare(
     glaze
     GIT_REPOSITORY https://github.com/stephenberry/glaze.git
-    GIT_TAG v9.0.0
+    GIT_TAG v9.1.0
     GIT_SHALLOW TRUE
 )
 FetchContent_MakeAvailable(glaze)
@@ -143,7 +143,7 @@ if(SPC_BUILD_BENCHMARKS)
     FetchContent_Declare(
         benchmark
         GIT_REPOSITORY https://github.com/google/benchmark.git
-        GIT_TAG 192ef10025eb2c4cdd392bc502f0c852196baa48 # v1.9.5
+        GIT_TAG a6b4a9f00b36c19af9997d68a1cf6e0b5b3d032c # v1.10.0
         SYSTEM
         EXCLUDE_FROM_ALL
     )

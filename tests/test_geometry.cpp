@@ -1,5 +1,5 @@
 /// @file test_geometry.cpp
-/// @brief Point-in-polygon tests. The first three match spc-data's own.
+/// @brief Point-in-polygon tests.
 
 #include "spc/geometry.hpp"
 #include "spc/models/convective.hpp"

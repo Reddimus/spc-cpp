@@ -275,12 +275,16 @@ Result<HttpResponse> HttpClient::get(std::string_view path) const {
 	if (impl.runtime->status() != CURLE_OK) {
 		return std::unexpected(Error::network(curl_easy_strerror(impl.runtime->status())));
 	}
+	const std::string url =
+		is_absolute_url(path) ? std::string{path} : impl.config.base_url + std::string{path};
+	if (!is_absolute_url(url)) {
+		return std::unexpected(Error::invalid_request(
+			"URL must use http:// or https:// (set ClientConfig::base_url for relative paths)"));
+	}
 	std::unique_ptr<Connection> connection = impl.checkout();
 	if (connection->curl == nullptr) {
 		return std::unexpected(Error::network("curl_easy_init failed"));
 	}
-	const std::string url =
-		is_absolute_url(path) ? std::string{path} : impl.config.base_url + std::string{path};
 	Result<HttpResponse> response = perform(*connection, url, impl.config);
 	impl.checkin(std::move(connection));
 	return response;

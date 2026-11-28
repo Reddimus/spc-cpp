@@ -3,8 +3,8 @@
 /// parsers.
 ///
 /// ArcGIS serves the same layer as Esri rings (f=json) and GeoJSON
-/// (f=geojson). `parse_esri_rings` must describe the same areas as the
-/// spc-data GeoJSON walker, so these tests compare point membership.
+/// (f=geojson). `parse_esri_rings` must describe the same areas as
+/// `parse_rings`, so these tests compare point membership.
 
 #include "models/json.hpp"
 #include "spc/geometry.hpp"

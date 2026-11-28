@@ -1,10 +1,9 @@
 /// @file json.hpp
 /// @brief Private, null-safe helpers over Glaze's generic JSON tree.
 ///
-/// The spc-data helpers (`lookup` through `parse_rings`) feed the spc-data
-/// service, which links this library and stores its output. Their output for
-/// every value SPC publishes must not change: key-case fallbacks, numeric
-/// strings, and outer rings only. tests/golden/ guards it.
+/// The outlook helpers (`lookup` through `parse_rings`) preserve key-case
+/// fallbacks, numeric strings, and outer-ring-only geometry across SPC feeds.
+/// `tests/golden/` guards parsed output against unintended changes.
 
 #pragma once
 

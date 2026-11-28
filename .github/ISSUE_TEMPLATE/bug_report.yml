@@ -30,8 +30,8 @@ body:
       label: Environment
       placeholder: |
         - spc-cpp: vX.Y.Z or commit
-        - OS: Ubuntu 24.04 / macOS 26
-        - Compiler: GCC 13.3 / Clang 18 / Apple Clang 17
+        - OS: Ubuntu 24.04 / macOS 15+ / Windows 11
+        - Compiler: GCC 13+ / Clang 18+ / Apple Clang 17+ / MSVC
         - libcurl: 8.5.0
     validations:
       required: true
