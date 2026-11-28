@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.13] - 2026-11-28
+
 ### Changed
 
 - Updated Glaze from 9.0.0 to 9.1.0 and Google Benchmark from 1.9.5 to 1.10.0.
