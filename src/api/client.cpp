@@ -552,7 +552,7 @@ Result<CategoricalOutlookPayload> ArcGISClient::query_categorical(std::int32_t d
 	CategoricalOutlookPayload seed;
 	seed.day_offset = day;
 	CallBudget budget = impl_->call_budget();
-	// GeoJSON, the shape the spc-data categorical parser reads.
+	// Request GeoJSON to match parse_categorical().
 	return impl_->paged_into(
 		product_layer(kArcGisOutlooks, descriptor->id, "geojson"), budget, std::move(seed),
 		&CategoricalOutlookPayload::features,

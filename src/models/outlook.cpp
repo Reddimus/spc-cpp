@@ -1,8 +1,7 @@
 /// @file outlook.cpp
 /// @brief Day 1-3 categorical and probabilistic parsers.
 ///
-/// These match the internal spc-data parser output for output. Change them
-/// only together with spc-data.
+/// Parsed output is guarded by tests/golden/.
 
 #include "spc/models/outlook.hpp"
 
@@ -156,7 +155,7 @@ ProbOutlookPayload detail::probabilistic_from_tree(const Json& root, std::int32_
 	return payload;
 }
 
-// The by-value `hazard` matches spc-data's signature.
+// Taken by value for API compatibility.
 ProbOutlookPayload
 parse_probabilistic(std::string_view body, std::int32_t day_offset,
 					std::string hazard) { // NOLINT(performance-unnecessary-value-param)

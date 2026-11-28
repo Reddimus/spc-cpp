@@ -80,9 +80,11 @@ public:
 	HttpClient& operator=(const HttpClient&) = delete;
 
 	/// Absolute HTTP and HTTPS URLs use case-insensitive schemes and bypass
-	/// `config().base_url`; other inputs are appended to it. Transfers and
-	/// redirects permit only HTTP and HTTPS, and an HTTPS request refuses a
-	/// redirect to HTTP. A refused redirect is `ErrorCode::InvalidRequest`.
+	/// `config().base_url`; other inputs are appended to it. If the resulting
+	/// URL does not use HTTP or HTTPS (for example, a relative path with an
+	/// empty `base_url`), `get` returns `ErrorCode::InvalidRequest` without
+	/// contacting the network. Transfers and redirects permit only HTTP and
+	/// HTTPS, and an HTTPS request refuses a redirect to HTTP.
 	[[nodiscard]] Result<HttpResponse> get(std::string_view path) const override;
 
 	/// The settings this client was built with; defaults on a moved-from client.

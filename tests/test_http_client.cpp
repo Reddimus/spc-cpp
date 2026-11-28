@@ -348,6 +348,24 @@ TEST(HttpClient, RefusesEverySchemeOtherThanHttpAndHttps) {
 	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
 }
 
+TEST(HttpClient, RejectsSchemelessPathsWithoutAnHttpBaseUrl) {
+	const HttpClient client;
+	for (const std::string_view path : {"", "./ok", "../ok", "ok", "ok/path", "/ok"}) {
+		const Result<HttpResponse> result = client.get(path);
+		ASSERT_FALSE(result) << path;
+		EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest) << path;
+		EXPECT_FALSE(should_retry(result.error(), RetryPolicy{})) << path;
+	}
+
+	ClientConfig schemeless_base;
+	schemeless_base.base_url = "example.com";
+	const HttpClient bad_base_client{schemeless_base};
+	const Result<HttpResponse> result = bad_base_client.get("/ok");
+	ASSERT_FALSE(result);
+	EXPECT_EQ(result.error().code, ErrorCode::InvalidRequest);
+	EXPECT_FALSE(should_retry(result.error(), RetryPolicy{}));
+}
+
 TEST(HttpClient, AMalformedUrlIsAnInvalidRequest) {
 	const HttpClient client;
 
